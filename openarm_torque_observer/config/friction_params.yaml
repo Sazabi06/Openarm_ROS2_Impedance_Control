@@ -1,0 +1,42 @@
+# Friction parameters ported from openarm_teleop/config/follower.yaml
+# These are the calibrated per-joint friction model coefficients.
+#
+# Friction model (tanh-based):
+#   tau_fric(dq) = amp * Fc * tanh(coef * k * dq) + Fv * dq + Fo
+#
+# Where amp=1.0, coef=0.1 (as used in openarm_teleop/control.cpp)
+#
+# Fc : Coulomb friction magnitude [Nm]
+# k  : tanh steepness near zero velocity
+# Fv : Viscous friction coefficient [Nm·s/rad]
+# Fo : Constant bias/offset torque [Nm]
+
+/**:
+  ros__parameters:
+    # --- Arm prefix ("right_" or "left_" for bimanual, "" for single arm) ---
+    arm_prefix: "right_"
+
+    # --- Friction model (7 arm joints, from follower.yaml) ---
+    friction:
+      Fc: [0.306,   0.306,   0.40,    0.166,   0.050,   0.093,   0.172]
+      k:  [28.417,  28.417,  29.065,  130.038, 151.771, 242.287, 7.888]
+      Fv: [0.063,   0.063,   0.604,   0.813,   0.029,   0.072,   0.084]
+      Fo: [0.088,   0.088,   0.008,  -0.058,   0.005,   0.009,  -0.059]
+
+    # --- MIT controller gains (from control_gains.yaml) ---
+    # Used to compute the PD controller's torque contribution:
+    #   tau_ctrl = Kp * (p_cmd - p_actual) + Kd * (v_cmd - v_actual)
+    # This allows separating controller torque from load torque.
+    control_gains:
+      kp: [70.0, 70.0, 70.0, 60.0, 10.0, 10.0, 10.0]
+      kd: [2.75, 2.5, 2.0, 2.0, 0.7, 0.6, 0.5]
+
+    # --- KDL chain configuration (for bimanual) ---
+    # root_link and tip_link are auto-derived from arm_prefix if left empty.
+    # For bimanual: root = openarm_body_link0, tip = openarm_{side}_hand
+    # For single:   root = openarm_link0,      tip = openarm_hand
+    root_link: "openarm_body_link0"
+    tip_link: ""
+
+    # --- Publish rate (Hz) ---
+    publish_rate: 50.0

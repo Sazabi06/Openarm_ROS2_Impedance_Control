@@ -1,0 +1,10 @@
+<library path="openarm_compliance_controller">
+  <class name="openarm_compliance_controller/ComplianceController"
+         type="openarm_compliance_controller::ComplianceController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Variable impedance controller with KDL-based gravity/friction/Coriolis
+      compensation for OpenArm. Writes tau_ff, stiffness, and damping.
+    </description>
+  </class>
+</library>
