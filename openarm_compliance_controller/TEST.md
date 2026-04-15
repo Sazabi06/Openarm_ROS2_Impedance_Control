@@ -3,6 +3,16 @@
 > Step-by-step verification for the `openarm_compliance_controller`.
 > Each test includes the exact command, expected output, and pass/fail criteria.
 
+This document is divided into two parts:
+
+| Part | Environment | Hardware | Tests |
+|------|-------------|----------|-------|
+| **[Part 1](#part-1-simulation-testing-fake-hardware)** | Simulation (`use_fake_hardware:=true`) | No real robot needed | Test 1–8, Demos, GUI |
+| **[Part 2](#part-2-real-hardware-testing)** | Real Hardware (`use_fake_hardware:=false`) | Physical OpenArm required | HW-0 through HW-7 |
+
+> [!IMPORTANT]
+> **Complete ALL Part 1 tests before moving to Part 2.** Part 2 requires CAN-FD bus setup first (HW-0).
+
 ---
 
 ## Prerequisites
@@ -13,11 +23,15 @@ source /opt/ros/humble/setup.bash
 source install/setup.bash
 ```
 
-All tests use **simulation** (`use_fake_hardware:=true`) unless stated otherwise.
+---
+
+# Part 1: Simulation Testing (Fake Hardware)
+
+> All tests in Part 1 use `use_fake_hardware:=true`. **No real robot is needed.**
 
 ---
 
-## Test 1: Build Verification
+## Test 1: Build Verification (Simulation)
 
 **Goal**: Controller compiles cleanly with zero errors.
 
@@ -34,7 +48,7 @@ Summary: 1 package finished [~10s]
 
 ---
 
-## Test 2: Controller Spawn & Activation
+## Test 2: Controller Spawn & Activation (Simulation)
 
 **Goal**: Controller loads, configures, and activates alongside the JointTrajectoryController.
 
@@ -73,7 +87,7 @@ Compliance controller activated with default gains
 
 ---
 
-## Test 3: Interface Claim Verification
+## Test 3: Interface Claim Verification (Simulation)
 
 **Goal**: Compliance controller claims `effort`, `stiffness`, `damping` — and ONLY those.
 
@@ -105,7 +119,7 @@ openarm_right_joint1/velocity   [available] [claimed]      ← by JTC
 
 ---
 
-## Test 4: tau_ff Topic Validation
+## Test 4: tau_ff Topic Validation (Simulation)
 
 **Goal**: Feedforward torque publishes at 100 Hz with correct physics.
 
@@ -179,7 +193,7 @@ Test 4b (zero position) where all values were < 0.2 Nm.
 
 ---
 
-## Test 5: Dynamic Impedance Adjustment via Topic
+## Test 5: Dynamic Impedance Adjustment via Topic (Simulation)
 
 **Goal**: `~/impedance_params` topic changes Kp/Kd in real-time.
 
@@ -208,7 +222,7 @@ impedance_params: expected 14 values, got 3
 
 ---
 
-## Test 6: Rate Limiting Verification
+## Test 6: Rate Limiting Verification (Simulation)
 
 **Goal**: Kp/Kd cannot jump instantaneously — changes are limited to ΔKp=2.0 and ΔKd=0.1 per cycle.
 
@@ -229,7 +243,7 @@ ros2 topic pub --once /right_compliance_controller/impedance_params \
 
 ---
 
-## Test 7: Safety Floor Enforcement
+## Test 7: Safety Floor Enforcement (Simulation)
 
 **Goal**: Kp never goes below kp_min, even if commanded to.
 
@@ -250,7 +264,7 @@ Additionally, the hardware `write()` function provides a **second layer** of enf
 
 ---
 
-## Test 8: Controller Deactivation
+## Test 8: Controller Deactivation (Simulation)
 
 **Goal**: Deactivating the controller cleanly restores default high-stiffness gains.
 
@@ -419,14 +433,12 @@ The compliance controller makes this possible by dynamically adjusting the motor
 
 ---
 
-## GUI Tool
+## GUI Tool (Works in Both Simulation and Real Hardware)
 
 A PyQt5-based GUI is provided for real-time impedance tuning:
 
-![GUI Mockup](/home/nirvana-ai/.gemini/antigravity/brain/8f6d6224-5d36-44ab-90a0-00793fd00506/gui_mockup.png)
-
 ```bash
-# Launch the GUI
+# Launch the GUI (works with either fake or real hardware)
 ros2 run openarm_compliance_controller impedance_gui.py --side right
 ```
 
@@ -434,15 +446,37 @@ Features:
 - **Per-joint Kp/Kd sliders** with real-time feedback
 - **Live tau_ff readout** showing computed feedforward torque
 - **E-STOP button** — resets all gains to defaults and sends arm to home
-- **Preset buttons** — quick access to common stiffness profiles
+- **Preset buttons** — quick access to common stiffness profiles (Full Stiff, Soft Wrist, Full Soft, Extra Stiff)
+
+### Simulation Checklist (Part 1 Complete)
+
+```
+[ ] Test 1: Build — compiles with zero errors
+[ ] Test 2: Controller spawns and activates
+[ ] Test 3: Correct interfaces claimed
+[ ] Test 4a: tau_ff publishes at 100 Hz
+[ ] Test 4b: tau_ff near-zero at home position
+[ ] Test 4c: tau_ff shows gravity at J2=90°
+[ ] Test 5: Dynamic impedance topic works
+[ ] Test 6: Rate limiting prevents sudden jumps
+[ ] Test 7: Safety floor clamps to kp_min/kd_min
+[ ] Test 8: Clean deactivation restores defaults
+```
+
+> [!IMPORTANT]
+> **ALL boxes above must be checked before proceeding to Part 2 (Real Hardware).**
 
 ---
 
-## Part 2: Real Hardware Testing
+# Part 2: Real Hardware Testing
 
 > [!CAUTION]
-> Real hardware testing must ONLY begin after ALL simulation tests (1-8) pass.
+> Real hardware testing must ONLY begin after ALL Part 1 simulation tests (1-8) pass.
 > Have someone ready to power off the robot during first-time compliance tests.
+
+**Required equipment**: Physical OpenArm V10, CAN-FD USB adapters, emergency power-off switch.
+
+**First step is ALWAYS [HW-0: CAN-FD Bus Setup](#hw-0-can-fd-bus-setup-required-after-every-reboot)**.
 
 ---
 
@@ -589,31 +623,66 @@ ros2 topic echo /right_compliance_controller/tau_ff --once
 - If arm is at home (near zero): tau_ff values should be < 1 Nm (similar to simulation Test 4b)
 - If arm is at a non-zero position: tau_ff should reflect gravity compensation for that position
 
-**Key validation**: Move arm to J2=45° and verify tau_ff J2 increases:
+**Key validation A**: Move arm to **J1=45°** and verify gravity torques change:
 ```bash
-# Store initial tau_ff
-ros2 topic echo /right_compliance_controller/tau_ff --once
-
-# Move arm (J2 = 45° = 0.785 rad)
+# Move J1 to 45° (all others stay at 0)
 ros2 action send_goal /right_joint_trajectory_controller/follow_joint_trajectory \
   control_msgs/action/FollowJointTrajectory \
-  "{trajectory: {joint_names: [openarm_right_joint1, openarm_right_joint2, openarm_right_joint3, openarm_right_joint4, openarm_right_joint5, openarm_right_joint6, openarm_right_joint7], points: [{positions: [0, 0.785, 0, 0, 0, 0, 0], time_from_start: {sec: 3}}]}}"
+  "{trajectory: {joint_names: [openarm_right_joint1, openarm_right_joint2, openarm_right_joint3, openarm_right_joint4, openarm_right_joint5, openarm_right_joint6, openarm_right_joint7], points: [{positions: [0.785, 0, 0, 0, 0, 0, 0], time_from_start: {sec: 3}}]}}"
 
-# Wait 4s, then re-check
+# Wait 4s, then check
 ros2 topic echo /right_compliance_controller/tau_ff --once
 ```
 
-**Expected**:
+**Expected** (J1=45°, all others at 0):
 ```yaml
-# At home (all zeros):
-data: [-0.015, 0.169, 0.008, -0.081, 0.005, -0.057, -0.059]  # small friction offsets
-
-# At J2=45°:
-data: [~0.08, ~6.5-8.5, ~0.01, ~-0.08, ~0.005, ~-0.06, ~-0.06]
-#              ↑ ~0.96 * gravity_at_45° ≈ 0.96 * 8.66 ≈ 8.3 Nm
+data:
+- ~8.47    # J1: rotating arm 45° creates significant gravity torque about J1 axis
+- ~0.15    # J2: similar to zero position (arm still hangs down from J2's perspective)
+- ~-0.05   # J3: small
+- ~2.17    # J4: the arm rotation shifts J4's load axis → now sees gravity contribution
+- ~-0.05   # J5: small
+- ~-0.04   # J6: friction offset
+- ~0.48    # J7: wrist mass offset from J1 rotation
 ```
 
-**Pass**: tau_ff changes with real joint position. J2 shows ~6-9 Nm at 45°.
+**Pass**: J1 tau_ff jumps from ~-0.01 Nm (zero position) to ~8.5 Nm at 45°.
+
+---
+
+**Key validation B**: Return to zero, then move arm to **J4=90°**:
+```bash
+# First return to zero position
+ros2 action send_goal /right_joint_trajectory_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  "{trajectory: {joint_names: [openarm_right_joint1, openarm_right_joint2, openarm_right_joint3, openarm_right_joint4, openarm_right_joint5, openarm_right_joint6, openarm_right_joint7], points: [{positions: [0, 0, 0, 0, 0, 0, 0], time_from_start: {sec: 3}}]}}"
+
+# Wait 4s, confirm zero baseline
+ros2 topic echo /right_compliance_controller/tau_ff --once
+
+# Move J4 to 90° (all others stay at 0)
+ros2 action send_goal /right_joint_trajectory_controller/follow_joint_trajectory \
+  control_msgs/action/FollowJointTrajectory \
+  "{trajectory: {joint_names: [openarm_right_joint1, openarm_right_joint2, openarm_right_joint3, openarm_right_joint4, openarm_right_joint5, openarm_right_joint6, openarm_right_joint7], points: [{positions: [0, 0, 0, 1.571, 0, 0, 0], time_from_start: {sec: 3}}]}}"
+
+# Wait 4s, then check
+ros2 topic echo /right_compliance_controller/tau_ff --once
+```
+
+**Expected** (J4=90°, all others at 0):
+```yaml
+data:
+- ~4.75    # J1: forearm extends horizontally → mass offset creates J1 torque
+- ~0.17    # J2: similar to zero position
+- ~0.008   # J3: small
+- ~3.11    # J4: 0.67 × gravity on forearm+wrist mass at 90° (scaled by calibration)
+- ~-0.07   # J5: small
+- ~0.009   # J6: friction offset
+- ~0.71    # J7: wrist weight in new orientation
+```
+
+**Pass**: J4 tau_ff jumps from ~-0.08 Nm (zero position) to ~3.1 Nm at 90°.
+J1 also shows ~4.75 Nm due to the shifted center of mass.
 
 ---
 

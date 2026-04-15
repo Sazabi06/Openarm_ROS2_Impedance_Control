@@ -45,9 +45,9 @@ JOINT_CONFIG = [
     ("J2 — Shoulder Pitch",  15.0, 150.0, 70.0,   0.50, 5.0, 2.50),
     ("J3 — Shoulder Roll",   15.0, 150.0, 70.0,   0.40, 5.0, 2.00),
     ("J4 — Elbow",           12.0, 120.0, 60.0,   0.40, 5.0, 2.00),
-    ("J5 — Wrist Yaw",       3.0,  30.0,  10.0,   0.15, 2.0, 0.70),
-    ("J6 — Wrist Pitch",     3.0,  30.0,  10.0,   0.12, 2.0, 0.60),
-    ("J7 — Wrist Roll",      3.0,  30.0,  10.0,   0.10, 2.0, 0.50),
+    ("J5 — Wrist Roll",      3.0,  30.0,  10.0,   0.15, 2.0, 0.70),
+    ("J6 — Wrist Yaw",       3.0,  30.0,  10.0,   0.12, 2.0, 0.60),
+    ("J7 — Wrist Pitch",     3.0,  30.0,  10.0,   0.10, 2.0, 0.50),
 ]
 
 PRESETS = {
@@ -262,7 +262,7 @@ class ImpedanceGui(QMainWindow):
 
         self.estop_btn = QPushButton("⬛  E-STOP")
         self.estop_btn.setStyleSheet(ESTOP_STYLE)
-        self.estop_btn.setFixedSize(160, 50)
+        self.estop_btn.setFixedSize(200, 50)
         self.estop_btn.clicked.connect(self._on_estop)
         header.addWidget(self.estop_btn)
         main_layout.addLayout(header)
