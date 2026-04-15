@@ -1,4 +1,4 @@
-# 🤖 OpenArm Impedance Controller
+# OpenArm Impedance Controller
 
 **Variable impedance control for the [OpenArm V10](https://openarm.dev) bimanual robot — enabling safe, compliant human-robot interaction.**
 
@@ -52,23 +52,23 @@ This repo contains three ROS 2 packages that work together:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    OpenArm Control Stack                        │
 │                                                                 │
-│  ┌──────────────────────┐    ┌──────────────────────────────┐  │
-│  │ JointTrajectory      │    │ ComplianceController         │  │
-│  │ Controller           │    │ (this repo)                  │  │
-│  │                      │    │                              │  │
-│  │ Writes:              │    │ Writes:                      │  │
-│  │  • position          │    │  • effort (τ_ff)             │  │
-│  │  • velocity          │    │  • stiffness (Kp)            │  │
-│  │                      │    │  • damping (Kd)              │  │
-│  └──────────┬───────────┘    └──────────────┬───────────────┘  │
+│  ┌──────────────────────┐    ┌──────────────────────────────┐   │
+│  │ JointTrajectory      │    │ ComplianceController         │   │
+│  │ Controller           │    │ (this repo)                  │   │
+│  │                      │    │                              │   │
+│  │ Writes:              │    │ Writes:                      │   │
+│  │  • position          │    │  • effort (τ_ff)             │   │
+│  │  • velocity          │    │  • stiffness (Kp)            │   │
+│  │                      │    │  • damping (Kd)              │   │
+│  └──────────┬───────────┘    └──────────────┬───────────────┘   │
 │             │                               │                   │
-│             └──────────┬────────────────────┘                   │
-│                        ▼                                        │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Hardware Interface (CAN-FD)                │   │
-│  │   Combines into MIT frame: {Kp, Kd, q_des, v_des, τ_ff}│   │
-│  │              → Damiao Actuators                         │   │
-│  └─────────────────────────────────────────────────────────┘   │
+│             └──────────────┬────────────────┘                   │
+│                            ▼                                    │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │              Hardware Interface (CAN-FD)                │    │
+│  │   Combines into MIT frame: {Kp, Kd, q_des, v_des, τ_ff}│     │
+│  │              → Damiao Actuators                         │    │
+│  └─────────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
