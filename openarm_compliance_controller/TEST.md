@@ -58,11 +58,16 @@ Summary: 1 package finished [~10s]
 ros2 launch openarm_bringup openarm.bimanual.launch.py use_fake_hardware:=true
 ```
 
-**Terminal 2** — Spawn compliance controller:
+**Terminal 2** — Spawn controllers:
 ```bash
+# Compliance controller (arm J1-J7 impedance)
 ros2 run controller_manager spawner right_compliance_controller \
   -c /controller_manager \
   --param-file $(ros2 pkg prefix openarm_compliance_controller)/share/openarm_compliance_controller/config/compliance_controller.yaml
+
+# Gripper stiffness/damping controllers (enables runtime Kp/Kd for gripper)
+ros2 run controller_manager spawner right_gripper_stiffness_controller -c /controller_manager
+ros2 run controller_manager spawner right_gripper_damping_controller -c /controller_manager
 ```
 
 **Expected**:
@@ -908,16 +913,21 @@ ros2 launch openarm_bringup openarm.bimanual.launch.py use_fake_hardware:=false
 
 Wait for: `Configured and activated right_joint_trajectory_controller`
 
-**Terminal 2** — Spawn compliance controller:
+**Terminal 2** — Spawn controllers:
 ```bash
 cd ~/ros2_ws && source /opt/ros/humble/setup.bash && source install/setup.bash
 
+# Compliance controller (arm J1-J7 impedance)
 ros2 run controller_manager spawner right_compliance_controller \
   -c /controller_manager \
   --param-file $(ros2 pkg prefix openarm_compliance_controller)/share/openarm_compliance_controller/config/compliance_controller.yaml
+
+# Gripper stiffness/damping controllers (enables runtime Kp/Kd for gripper)
+ros2 run controller_manager spawner right_gripper_stiffness_controller -c /controller_manager
+ros2 run controller_manager spawner right_gripper_damping_controller -c /controller_manager
 ```
 
-Wait for: `Configured and activated right_compliance_controller`
+Wait for: `Configured and activated right_gripper_damping_controller`
 
 ---
 
