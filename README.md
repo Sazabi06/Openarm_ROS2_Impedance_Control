@@ -1,4 +1,4 @@
-# OpenArm Impedance Controller
+# 🤖 OpenArm Impedance Controller
 
 **Variable impedance control for the [OpenArm V10](https://openarm.dev) bimanual robot — enabling safe, compliant human-robot interaction.**
 
@@ -52,23 +52,23 @@ This repo contains three ROS 2 packages that work together:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    OpenArm Control Stack                        │
 │                                                                 │
-│  ┌──────────────────────┐    ┌──────────────────────────────┐   │
-│  │ JointTrajectory      │    │ ComplianceController         │   │
-│  │ Controller           │    │ (this repo)                  │   │
-│  │                      │    │                              │   │
-│  │ Writes:              │    │ Writes:                      │   │
-│  │  • position          │    │  • effort (τ_ff)             │   │
-│  │  • velocity          │    │  • stiffness (Kp)            │   │
-│  │                      │    │  • damping (Kd)              │   │
-│  └──────────┬───────────┘    └──────────────┬───────────────┘   │
+│  ┌──────────────────────┐    ┌──────────────────────────────┐  │
+│  │ JointTrajectory      │    │ ComplianceController         │  │
+│  │ Controller           │    │ (this repo)                  │  │
+│  │                      │    │                              │  │
+│  │ Writes:              │    │ Writes:                      │  │
+│  │  • position          │    │  • effort (τ_ff)             │  │
+│  │  • velocity          │    │  • stiffness (Kp)            │  │
+│  │                      │    │  • damping (Kd)              │  │
+│  └──────────┬───────────┘    └──────────────┬───────────────┘  │
 │             │                               │                   │
-│             └──────────────┬────────────────┘                   │
-│                            ▼                                    │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │              Hardware Interface (CAN-FD)                │    │
-│  │   Combines into MIT frame: {Kp, Kd, q_des, v_des, τ_ff}│     │
-│  │              → Damiao Actuators                         │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│             └──────────┬────────────────────┘                   │
+│                        ▼                                        │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Hardware Interface (CAN-FD)                │   │
+│  │   Combines into MIT frame: {Kp, Kd, q_des, v_des, τ_ff}│   │
+│  │              → Damiao Actuators                         │   │
+│  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -107,6 +107,7 @@ Layer 3: Motor Firmware (Damiao)
 | J1-J3 (Shoulder) | 15 – 150 | 0.4 – 5.0 | 70 | 2.0 – 2.75 |
 | J4 (Elbow) | 12 – 120 | 0.4 – 5.0 | 60 | 2.0 |
 | J5-J7 (Wrist) | 3 – 30 | 0.1 – 2.0 | 10 | 0.5 – 0.7 |
+| Gripper (DM4310) | 0.3 – 10.0 | 0.05 – 1.0 | 2.0 | 0.1 |
 
 ---
 
@@ -167,10 +168,14 @@ sudo ip link set can1 up type can bitrate 1000000 dbitrate 5000000 fd on
 # Terminal 1: Bringup (real hardware)
 ros2 launch openarm_bringup openarm.bimanual.launch.py use_fake_hardware:=false
 
-# Terminal 2: Spawn compliance controller
+# Terminal 2: Spawn controllers
 ros2 run controller_manager spawner right_compliance_controller \
   -c /controller_manager \
   --param-file $(ros2 pkg prefix openarm_compliance_controller)/share/openarm_compliance_controller/config/compliance_controller.yaml
+
+# Spawn gripper stiffness/damping controllers (enables runtime gripper Kp/Kd)
+ros2 run controller_manager spawner right_gripper_stiffness_controller -c /controller_manager
+ros2 run controller_manager spawner right_gripper_damping_controller -c /controller_manager
 ```
 
 ### 3. Launch the Tuning GUI
@@ -181,8 +186,10 @@ ros2 run openarm_compliance_controller impedance_gui.py --side right
 ```
 
 The GUI provides:
-- **Per-joint Kp/Kd sliders** with real-time value display
+- **Per-joint Kp/Kd sliders** with real-time value display (J1-J7 + Gripper)
 - **Live τ_ff readout** with color coding (green/yellow/red)
+- **Gripper control** — position input (0-32mm), Open/Close buttons
+- **Gripper impedance** — G (Grip/firm, Kp=5.0) and S (Soft/gentle, Kp=1.0) toggle buttons
 - **E-STOP button** — resets gains to defaults + sends arm home
 - **Preset buttons** — Full Stiff, Soft Wrist, Full Soft, Extra Stiff
 
@@ -217,14 +224,16 @@ ros2 topic echo /right_compliance_controller/tau_ff --once
 | Topic | Type | Description |
 |-------|------|-------------|
 | `~/impedance_params` | `Float64MultiArray` | Target gains [Kp1..Kp7, Kd1..Kd7] (14 values) |
+| `/{side}_gripper_stiffness_controller/commands` | `Float64MultiArray` | Gripper Kp [1 value] |
+| `/{side}_gripper_damping_controller/commands` | `Float64MultiArray` | Gripper Kd [1 value] |
 
 ### Command Interfaces (Written to Hardware)
 
 | Interface | Description |
 |-----------|-------------|
 | `<joint>/effort` | Feedforward torque τ_ff |
-| `<joint>/stiffness` | Position gain Kp |
-| `<joint>/damping` | Velocity gain Kd |
+| `<joint>/stiffness` | Position gain Kp (arm J1-J7 + gripper) |
+| `<joint>/damping` | Velocity gain Kd (arm J1-J7 + gripper) |
 
 ---
 
@@ -301,16 +310,20 @@ Openarm_Impedance_Controller/
 │   ├── package.xml
 │   ├── openarm_compliance_controller.xml   # pluginlib descriptor
 │   ├── config/
-│   │   └── compliance_controller.yaml      # Gains, limits, friction params
+│   │   ├── compliance_controller.yaml      # Gains, limits, friction params
+│   │   └── gripper_stiffness_controller.yaml  # Gripper Kp/Kd FCC config
 │   ├── include/openarm_compliance_controller/
 │   │   └── compliance_controller.hpp       # Controller header
 │   ├── src/
 │   │   └── compliance_controller.cpp       # KDL dynamics + impedance logic
 │   ├── scripts/
-│   │   └── impedance_gui.py                # PyQt5 tuning GUI
+│   │   ├── impedance_gui.py                # PyQt5 tuning GUI (arm + gripper)
+│   │   └── motor_feedback_diagnostic.py    # Hardware diagnostic tool
 │   ├── launch/
 │   │   └── compliance.launch.py
-│   └── TEST.md                             # Full test plan
+│   ├── TEST.md                             # Full test plan
+│   ├── IMPLEMENTATION_PLAN.md              # Roadmap
+│   └── AGENT_TASKS.md                      # Multi-agent task delegation
 ├── openarm_torque_observer/           # Torque model validation
 │   ├── openarm_torque_observer/
 │   │   └── torque_observer_node.py         # KDL-based torque observer

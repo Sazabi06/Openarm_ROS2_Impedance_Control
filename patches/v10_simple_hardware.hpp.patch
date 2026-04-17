@@ -1,0 +1,28 @@
+--- /home/nirvana-ai/ros2_ws/src/core/openarm_ros2/openarm_hardware/include/openarm_hardware/v10_simple_hardware.hpp.bak	2026-04-17 13:45:03.781810452 -0400
++++ /home/nirvana-ai/ros2_ws/src/core/openarm_ros2/openarm_hardware/include/openarm_hardware/v10_simple_hardware.hpp	2026-04-17 14:23:09.223431970 -0400
+@@ -100,18 +100,20 @@
+   const uint32_t DEFAULT_GRIPPER_RECV_CAN_ID = 0x18;
+ 
+   // Default gains (loaded from xacro/config)
+-  std::vector<double> kp_ = {70.0, 70.0, 70.0, 60.0, 10.0, 10.0, 10.0};
+-  std::vector<double> kd_ = {2.75, 2.5, 2.0, 2.0, 0.7, 0.6, 0.5};
++  // 7 arm joints + 1 gripper
++  std::vector<double> kp_ = {70.0, 70.0, 70.0, 60.0, 10.0, 10.0, 10.0, 2.0};
++  std::vector<double> kd_ = {2.75, 2.5, 2.0, 2.0, 0.7, 0.6, 0.5, 0.1};
+ 
+   // Dynamic stiffness/damping command vectors (writable by controllers)
+   std::vector<double> kp_commands_;
+   std::vector<double> kd_commands_;
+ 
+   // Safety floor — hardware enforces these minimums regardless of controller
+-  std::vector<double> kp_min_ = {15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0};
+-  std::vector<double> kd_min_ = {0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1};
++  // 7 arm joints + 1 gripper
++  std::vector<double> kp_min_ = {15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0, 0.3};
++  std::vector<double> kd_min_ = {0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1, 0.05};
+ 
+-  const double GRIPPER_JOINT_0_POSITION = 0.044;
++  const double GRIPPER_JOINT_0_POSITION = 0.044;  // motor mapping range (URDF limit)
+   const double GRIPPER_JOINT_1_POSITION = 0.0;
+   const double GRIPPER_MOTOR_0_RADIANS = 0.0;
+   const double GRIPPER_MOTOR_1_RADIANS = -1.0472;

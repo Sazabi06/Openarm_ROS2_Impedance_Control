@@ -18,6 +18,7 @@
   <depend>orocos_kdl_vendor</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
 
   <export>
     <build_type>ament_cmake</build_type>

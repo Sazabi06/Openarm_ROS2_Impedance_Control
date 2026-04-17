@@ -1,0 +1,46 @@
+--- /home/nirvana-ai/ros2_ws/src/core/openarm_ros2/openarm_hardware/src/v10_simple_hardware.cpp.bak	2026-04-17 13:45:03.780810488 -0400
++++ /home/nirvana-ai/ros2_ws/src/core/openarm_ros2/openarm_hardware/src/v10_simple_hardware.cpp	2026-04-17 13:46:29.169949241 -0400
+@@ -178,6 +178,11 @@
+                 "  J%zu: kp=%.1f (min=%.1f), kd=%.2f (min=%.2f)",
+                 i + 1, kp_[i], kp_min_[i], kd_[i], kd_min_[i]);
+   }
++  if (hand_ && kp_.size() > ARM_DOF) {
++    RCLCPP_INFO(rclcpp::get_logger("OpenArm_v10HW"),
++                "  Gripper: kp=%.1f (min=%.1f), kd=%.2f (min=%.2f)",
++                kp_[ARM_DOF], kp_min_[ARM_DOF], kd_[ARM_DOF], kd_min_[ARM_DOF]);
++  }
+ 
+   // Initialize temperature publisher
+   std::string temp_node_name = "openarm_hw_telemetry";
+@@ -240,13 +245,11 @@
+     command_interfaces.emplace_back(hardware_interface::CommandInterface(
+         joint_names_[i], hardware_interface::HW_IF_EFFORT, &tau_commands_[i]));
+ 
+-    // Stiffness/damping command interfaces (arm joints only, not gripper)
+-    if (i < ARM_DOF) {
+-      command_interfaces.emplace_back(hardware_interface::CommandInterface(
+-          joint_names_[i], "stiffness", &kp_commands_[i]));
+-      command_interfaces.emplace_back(hardware_interface::CommandInterface(
+-          joint_names_[i], "damping", &kd_commands_[i]));
+-    }
++    // Stiffness/damping command interfaces (arm joints + gripper)
++    command_interfaces.emplace_back(hardware_interface::CommandInterface(
++        joint_names_[i], "stiffness", &kp_commands_[i]));
++    command_interfaces.emplace_back(hardware_interface::CommandInterface(
++        joint_names_[i], "damping", &kd_commands_[i]));
+   }
+ 
+   return command_interfaces;
+@@ -361,8 +364,11 @@
+   if (hand_ && joint_names_.size() > ARM_DOF) {
+     // TODO the true mappings are unimplemented.
+     double motor_command = joint_to_motor_radians(pos_commands_[ARM_DOF]);
++    // Use dynamic Kp/Kd from command interface (controllable at runtime)
++    double grip_kp = std::max(kp_commands_[ARM_DOF], kp_min_[ARM_DOF]);
++    double grip_kd = std::max(kd_commands_[ARM_DOF], kd_min_[ARM_DOF]);
+     openarm_->get_gripper().mit_control_all(
+-        {{GRIPPER_KP, GRIPPER_KD, motor_command, 0, 0}});
++        {{grip_kp, grip_kd, motor_command, 0, 0}});
+   }
+   openarm_->recv_all(1000);
+   return hardware_interface::return_type::OK;

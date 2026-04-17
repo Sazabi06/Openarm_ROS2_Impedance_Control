@@ -9,6 +9,7 @@ This document is divided into two parts:
 |------|-------------|----------|-------|
 | **[Part 1](#part-1-simulation-testing-fake-hardware)** | Simulation (`use_fake_hardware:=true`) | No real robot needed | Test 1–8, Demos, GUI |
 | **[Part 2](#part-2-real-hardware-testing)** | Real Hardware (`use_fake_hardware:=false`) | Physical OpenArm required | HW-0 through HW-7 |
+| **[Part 3](#part-3-gui-demo-guide-real-hardware)** | Real Hardware + GUI | Physical OpenArm required | 4 GUI-based demos |
 
 > [!IMPORTANT]
 > **Complete ALL Part 1 tests before moving to Part 2.** Part 2 requires CAN-FD bus setup first (HW-0).
@@ -864,3 +865,221 @@ Post-test:
 | `can0 not found` | USB-CAN adapter not plugged in or driver missing | Check `ip link show` and USB connections |
 | Controller fails to load | Library not rebuilt after code changes | Full restart: kill bringup → rebuild → relaunch |
 
+---
+
+# Part 3: GUI Demo Guide (Real Hardware)
+
+> This section provides step-by-step demos using the **enhanced GUI** on real hardware.
+> Each demo is self-contained — start from Step 0 after a fresh reboot.
+
+---
+
+## Step 0: CAN-FD Setup (Required After Every Reboot)
+
+```bash
+# Bring down existing interfaces
+sudo ip link set can0 down 2>/dev/null
+sudo ip link set can1 down 2>/dev/null
+
+# Configure CAN-FD (1Mbps nominal, 5Mbps data)
+sudo ip link set can0 up type can bitrate 1000000 dbitrate 5000000 fd on
+sudo ip link set can1 up type can bitrate 1000000 dbitrate 5000000 fd on
+
+# Verify
+ip -details link show can0 | head -3
+ip -details link show can1 | head -3
+```
+
+**Pass**: Both show `UP,LOWER_UP`, `<FD>`, and `ERROR-ACTIVE`.
+
+> **Mapping**: `can0` = right arm, `can1` = left arm
+
+---
+
+## Step 1: Launch Bringup + Spawn Compliance Controller
+
+**Terminal 1** — Bringup:
+```bash
+cd ~/ros2_ws
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 launch openarm_bringup openarm.bimanual.launch.py use_fake_hardware:=false
+```
+
+Wait for: `Configured and activated right_joint_trajectory_controller`
+
+**Terminal 2** — Spawn compliance controller:
+```bash
+cd ~/ros2_ws && source /opt/ros/humble/setup.bash && source install/setup.bash
+
+ros2 run controller_manager spawner right_compliance_controller \
+  -c /controller_manager \
+  --param-file $(ros2 pkg prefix openarm_compliance_controller)/share/openarm_compliance_controller/config/compliance_controller.yaml
+```
+
+Wait for: `Configured and activated right_compliance_controller`
+
+---
+
+## Step 2: Launch the GUI
+
+**Terminal 2** (same terminal, controller already spawned):
+```bash
+ros2 run openarm_compliance_controller impedance_gui.py --side right
+```
+
+**Expected**:
+- GUI window opens with dark theme
+- Status bar shows: `🟢 Connected to /right_compliance_controller`
+- Log window shows: `GUI started, waiting for URDF joint limits...`
+- After ~2 seconds: `✅ Joint limits loaded from URDF`
+- τ_ff values appear for all 7 joints (color-coded: green < 5Nm)
+- Controller status shows: `Status: 🟢 ACTIVE`
+
+---
+
+## Demo 1: Joint Positioning — Move Arm Using GUI
+
+**Goal**: Verify the joint angle input and trajectory execution work correctly.
+
+### Steps:
+1. In the **Target Joint Angles** panel, set **J1 = 45.0°** (type or use arrows)
+2. Leave all other joints at 0°
+3. Set **Time = 3.0s**
+4. Click **▶ Run**
+
+**Expected**:
+- Log shows: `▶ Trajectory sent: J1=45.0°, J2=0.0°, ... (3.0s)`
+- Robot arm rotates J1 to 45°
+- τ_ff values update in real-time as arm moves
+- J1 τ_ff changes from ~0 to ~8.5 Nm (gravity compensation)
+
+### Verify:
+5. Click **🏠 Home** to return to zero
+6. Log shows: `🏠 Home trajectory sent (3.0s)`
+7. Arm returns to home position
+
+**Pass**: Arm moves to commanded angle and returns home. τ_ff values update in real-time.
+
+---
+
+## Demo 2: Gravity Compensation — "Weightless Arm"
+
+**Goal**: Show that τ_ff compensates gravity, allowing low Kp without arm drooping.
+
+### Steps:
+1. Move arm to a non-zero position:
+   - Set **J1 = 45°**, click **▶ Run**, wait for motion to complete
+2. Observe τ_ff for J1 (should show ~8.5 Nm in green/yellow)
+3. Now **gradually lower J1 Kp**: drag the J1 Kp slider from 70 → 50 → 30 → 15
+4. At each Kp level, gently **push J1 with your hand** and release
+
+**Expected**:
+| Kp | Push Response | Return Behavior |
+|----|--------------|-----------------|
+| 70 | Arm resists strongly | Snaps back precisely |
+| 50 | Arm gives slightly | Returns accurately |
+| 30 | Arm yields noticeably | Returns slowly |
+| 15 | Arm very compliant | Returns mostly (may have small offset due to friction) |
+
+**Key observation**: At Kp=15, the arm **still holds its position against gravity** (no sagging), because τ_ff is providing ~8.5 Nm of gravity compensation. Without τ_ff, the arm would immediately drop.
+
+5. Click **🔒 Full Stiff (Default)** preset to restore
+6. Log shows: `Preset applied: 🔒 Full Stiff (Default)`
+
+**Pass**: Arm holds position at all Kp levels. Compliance increases as Kp drops. No sagging.
+
+---
+
+## Demo 3: Variable Stiffness — "Stiff Shoulder, Soft Wrist"
+
+**Goal**: Different stiffness on different joints — stiff base for stability, soft wrist for safe contact.
+
+### Steps:
+1. Move arm to a working position:
+   - Set **J1 = 30°**, **J4 = 45°**, click **▶ Run**
+2. Click **🤝 Soft Wrist** preset
+3. Log shows: `Preset applied: 🤝 Soft Wrist`
+
+**Expected after preset**:
+| Joint Group | Kp | Behavior |
+|-------------|-----|----------|
+| J1-J3 (Shoulder) | 70 | Stiff — arm holds trajectory |
+| J4 (Elbow) | 20 | Moderately compliant |
+| J5-J7 (Wrist) | 3 | Very soft — deflects easily |
+
+4. **Test compliance**:
+   - Push the wrist (J5-J7 area) → it should deflect easily and slowly return
+   - Push the upper arm (J1-J3 area) → it should resist firmly
+5. Click **🔒 Full Stiff (Default)** to restore
+
+**Pass**: Wrist yields to gentle pressure. Shoulder remains firm. Arm maintains position.
+
+---
+
+## Demo 4: Full Workflow — Position + Comply + E-STOP
+
+**Goal**: Demonstrate the complete GUI workflow including emergency stop.
+
+### Steps:
+1. **Position**: Set J1=30°, J2=20°, J4=30°, click **▶ Run** → arm moves to pose
+2. **Comply**: Click **🪶 Full Soft (Min)** → all joints become compliant
+3. **Interact**: Gently push various joints by hand — arm yields and slowly returns
+4. **Emergency**: Press **⬛ E-STOP**
+
+**Expected after E-STOP**:
+- Log shows: `🚨 E-STOP triggered → defaults restored + home trajectory sent`
+- Button temporarily shows "RESET SENT" (gray)
+- All Kp/Kd sliders reset to defaults
+- Arm moves to home position (all zeros) in 3 seconds
+- Button returns to red "E-STOP" after 2 seconds
+
+5. **Deactivate**: Click **🔄 Deactivate**
+
+**Expected**:
+- Controller status changes to: `Status: ⚪ INACTIVE`
+- All sliders become grayed out (disabled)
+- Log shows: `Controller deactivated — gains restored to defaults`
+- Arm still holds position (JTC still running with default hardware gains)
+
+6. **Re-activate**: Click **▶ Activate**
+
+**Expected**:
+- Status returns to: `Status: 🟢 ACTIVE`
+- Sliders re-enable
+- Log shows: `Controller activated`
+
+**Pass**: Full cycle completes without errors. E-STOP works immediately. Controller toggle works.
+
+---
+
+## GUI Demo Checklist
+
+```
+Setup:
+[ ] CAN-FD configured (can0 + can1 UP with FD)
+[ ] Bringup launched successfully
+[ ] Compliance controller spawned
+[ ] GUI launched and shows "🟢 ACTIVE"
+[ ] Joint limits loaded from URDF
+
+Demo 1 — Joint Positioning:
+[ ] J1=45° trajectory executes correctly
+[ ] Home button returns arm to zero
+[ ] τ_ff values update in real-time
+
+Demo 2 — Gravity Compensation:
+[ ] Arm holds position at Kp=15 (no sag)
+[ ] Compliance increases as Kp decreases
+[ ] Arm returns after push at each Kp level
+
+Demo 3 — Variable Stiffness:
+[ ] Soft Wrist preset: wrist compliant, shoulder stiff
+[ ] Differential compliance clearly observable
+
+Demo 4 — Full Workflow:
+[ ] Position → Comply → Interact → E-STOP cycle works
+[ ] E-STOP resets gains and sends home
+[ ] Controller toggle (deactivate/activate) works
+[ ] Sliders gray out when deactivated
+```
