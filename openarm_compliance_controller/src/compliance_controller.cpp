@@ -142,9 +142,15 @@ controller_interface::CallbackReturn ComplianceController::on_configure(
   };
   if (!validate_size(tau_ff_scale_, "tau_ff_scale") ||
       !validate_size(Fc_, "friction.Fc") ||
+      !validate_size(k_coeff_, "friction.k") ||
+      !validate_size(Fv_, "friction.Fv") ||
+      !validate_size(Fo_, "friction.Fo") ||
       !validate_size(kp_default_, "kp_default") ||
+      !validate_size(kd_default_, "kd_default") ||
       !validate_size(kp_max_, "kp_max") ||
-      !validate_size(kp_min_, "kp_min")) {
+      !validate_size(kd_max_, "kd_max") ||
+      !validate_size(kp_min_, "kp_min") ||
+      !validate_size(kd_min_, "kd_min")) {
     return controller_interface::CallbackReturn::ERROR;
   }
 
@@ -235,13 +241,22 @@ controller_interface::CallbackReturn ComplianceController::on_configure(
   impedance_sub_ = get_node()->create_subscription<std_msgs::msg::Float64MultiArray>(
       "~/impedance_params", 10,
       [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
-        if (msg->data.size() == 2 * num_joints_) {
-          rt_impedance_buffer_.writeFromNonRT(msg->data);
-        } else {
+        if (msg->data.size() != 2 * num_joints_) {
           RCLCPP_WARN(get_node()->get_logger(),
                       "impedance_params: expected %zu values, got %zu",
                       2 * num_joints_, msg->data.size());
+          return;
         }
+        // Reject non-finite values: a NaN/Inf would pass through std::clamp
+        // unchanged and be written straight to the motors.
+        for (double v : msg->data) {
+          if (!std::isfinite(v)) {
+            RCLCPP_WARN(get_node()->get_logger(),
+                        "impedance_params: dropping message with non-finite value");
+            return;
+          }
+        }
+        rt_impedance_buffer_.writeFromNonRT(msg->data);
       });
 
   // Initialize RT buffer with defaults
@@ -376,10 +391,16 @@ controller_interface::return_type ComplianceController::update(
   }
 
   // ------ 6. Write to command interfaces ------
+  // Last-line safety net: if a non-finite value escaped the dynamics solver,
+  // fall back to a safe command (zero feedforward, default gains) rather than
+  // sending NaN to the motors.
   for (size_t i = 0; i < num_joints_; ++i) {
-    command_interfaces_[i * 3 + 0].set_value(tau_ff[i]);       // effort
-    command_interfaces_[i * 3 + 1].set_value(kp_current_[i]);  // stiffness
-    command_interfaces_[i * 3 + 2].set_value(kd_current_[i]);  // damping
+    double eff = std::isfinite(tau_ff[i]) ? tau_ff[i] : 0.0;
+    double kp = std::isfinite(kp_current_[i]) ? kp_current_[i] : kp_default_[i];
+    double kd = std::isfinite(kd_current_[i]) ? kd_current_[i] : kd_default_[i];
+    command_interfaces_[i * 3 + 0].set_value(eff);  // effort
+    command_interfaces_[i * 3 + 1].set_value(kp);   // stiffness
+    command_interfaces_[i * 3 + 2].set_value(kd);   // damping
   }
 
   // ------ 7. Publish tau_ff for diagnostics (non-blocking) ------

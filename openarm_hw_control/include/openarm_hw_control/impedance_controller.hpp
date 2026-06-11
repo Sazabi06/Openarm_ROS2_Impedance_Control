@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <memory>
 #include <string>
 #include <vector>
@@ -78,7 +79,10 @@ private:
     pinocchio::JointIndex link7_id_;
     double original_link7_mass_ = 0.0;
     Eigen::VectorXd q_, v_, a_;
-    
+    Eigen::VectorXd v_zero_;        // preallocated (RT loop must not allocate)
+    std::array<int, 7> q_idx_{};    // arm joint i -> Pinocchio configuration index
+    std::array<int, 7> v_idx_{};    // arm joint i -> Pinocchio velocity index
+
     // Control state
     bool in_estop_ = false;
 };
