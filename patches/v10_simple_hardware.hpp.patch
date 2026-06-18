@@ -1,5 +1,5 @@
---- /home/nirvana-ai/ros2_ws/src/core/openarm_ros2/openarm_hardware/include/openarm_hardware/v10_simple_hardware.hpp.bak	2026-04-17 13:45:03.781810452 -0400
-+++ /home/nirvana-ai/ros2_ws/src/core/openarm_ros2/openarm_hardware/include/openarm_hardware/v10_simple_hardware.hpp	2026-04-17 14:23:09.223431970 -0400
+--- /home/user/ros2_ws/src/core/openarm_ros2/openarm_hardware/include/openarm_hardware/v10_simple_hardware.hpp.bak	2026-04-17 13:45:03.781810452 -0400
++++ /home/user/ros2_ws/src/core/openarm_ros2/openarm_hardware/include/openarm_hardware/v10_simple_hardware.hpp	2026-04-17 14:23:09.223431970 -0400
 @@ -100,18 +100,20 @@
    const uint32_t DEFAULT_GRIPPER_RECV_CAN_ID = 0x18;
  

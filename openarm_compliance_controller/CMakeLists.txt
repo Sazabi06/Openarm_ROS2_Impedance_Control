@@ -45,7 +45,12 @@ install(TARGETS openarm_compliance_controller
 install(DIRECTORY include/ DESTINATION include)
 install(DIRECTORY config/ DESTINATION share/${PROJECT_NAME}/config)
 install(DIRECTORY launch/ DESTINATION share/${PROJECT_NAME}/launch)
-install(PROGRAMS scripts/impedance_gui.py
+install(PROGRAMS
+  scripts/impedance_gui.py
+  scripts/impedance_demo_ab.py
+  scripts/force_monitor.py
+  scripts/cartesian_goal_executor.py
+  scripts/impedance_profile_manager.py
   DESTINATION lib/${PROJECT_NAME}
 )
 

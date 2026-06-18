@@ -1,0 +1,84 @@
+# Compliance controller configuration for SIMULATION (fake hardware)
+# Identical to compliance_controller.yaml but with gripper disabled
+# because fake hardware does not expose stiffness/damping interfaces
+# for the gripper joint.
+
+right_compliance_controller:
+  ros__parameters:
+    joints:
+      - openarm_right_joint1
+      - openarm_right_joint2
+      - openarm_right_joint3
+      - openarm_right_joint4
+      - openarm_right_joint5
+      - openarm_right_joint6
+      - openarm_right_joint7
+
+    root_link: "openarm_body_link0"
+    tip_link: "openarm_right_hand"
+
+    tau_ff_scale: [1.0, 0.96, 1.0, 0.67, 1.0, 1.0, 1.0]
+
+    friction:
+      Fc: [0.306,   0.306,   0.40,    0.166,   0.050,   0.093,   0.172]
+      k:  [28.417,  28.417,  29.065,  130.038, 151.771, 242.287, 7.888]
+      Fv: [0.063,   0.063,   0.604,   0.813,   0.029,   0.072,   0.084]
+      Fo: [0.088,   0.088,   0.008,  -0.058,   0.005,   0.009,  -0.059]
+
+    kp_default: [70.0, 70.0, 70.0, 60.0, 10.0, 10.0, 10.0]
+    kd_default: [2.75, 2.5, 2.0, 2.0, 0.7, 0.6, 0.5]
+    kp_max: [150.0, 150.0, 150.0, 120.0, 30.0, 30.0, 30.0]
+    kd_max: [5.0, 5.0, 5.0, 5.0, 2.0, 2.0, 2.0]
+    kp_min: [15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0]
+    kd_min: [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]
+    delta_kp_max: 2.0
+    delta_kd_max: 0.1
+    ext_force_alpha: 0.05
+
+    # Gripper DISABLED for sim (fake HW has no stiffness/damping interfaces)
+    gripper_joint: ""
+
+    # Teach mode preset (Task 3.2s)
+    teach_mode:
+      kp: [15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0]
+      kd: [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]
+
+left_compliance_controller:
+  ros__parameters:
+    joints:
+      - openarm_left_joint1
+      - openarm_left_joint2
+      - openarm_left_joint3
+      - openarm_left_joint4
+      - openarm_left_joint5
+      - openarm_left_joint6
+      - openarm_left_joint7
+
+    root_link: "openarm_body_link0"
+    tip_link: "openarm_left_hand"
+
+    tau_ff_scale: [1.0, 0.96, 1.0, 0.67, 1.0, 1.0, 1.0]
+
+    friction:
+      Fc: [0.306,   0.306,   0.40,    0.166,   0.050,   0.093,   0.172]
+      k:  [28.417,  28.417,  29.065,  130.038, 151.771, 242.287, 7.888]
+      Fv: [0.063,   0.063,   0.604,   0.813,   0.029,   0.072,   0.084]
+      Fo: [0.088,   0.088,   0.008,  -0.058,   0.005,   0.009,  -0.059]
+
+    kp_default: [70.0, 70.0, 70.0, 60.0, 10.0, 10.0, 10.0]
+    kd_default: [2.75, 2.5, 2.0, 2.0, 0.7, 0.6, 0.5]
+    kp_max: [150.0, 150.0, 150.0, 120.0, 30.0, 30.0, 30.0]
+    kd_max: [5.0, 5.0, 5.0, 5.0, 2.0, 2.0, 2.0]
+    kp_min: [15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0]
+    kd_min: [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]
+    delta_kp_max: 2.0
+    delta_kd_max: 0.1
+    ext_force_alpha: 0.05
+
+    # Gripper DISABLED for sim
+    gripper_joint: ""
+
+    # Teach mode preset (Task 3.2s)
+    teach_mode:
+      kp: [15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0]
+      kd: [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]

@@ -6,6 +6,7 @@ PyQt5 GUI for OpenArm Compliance Controller — Integrated Control Panel.
 
 Features:
   - Controller activate/deactivate toggle
+  - Teach mode toggle (publishes to /impedance_phase)
   - Per-joint Kp/Kd sliders with real-time numeric display
   - Live tau_ff readout from the controller
   - E-STOP button: resets to defaults + sends home trajectory
@@ -15,8 +16,9 @@ Features:
   - Log subwindow showing all operations
 
 Usage:
-  ros2 run openarm_compliance_controller impedance_gui.py
-  ros2 run openarm_compliance_controller impedance_gui.py --side left
+  python3 impedance_gui.py              # right arm (default)
+  python3 impedance_gui.py --side left  # left arm
+  python3 impedance_gui.py --side both  # bimanual (tabbed)
 """
 
 import sys
@@ -39,7 +41,7 @@ from controller_manager_msgs.srv import SwitchController
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QLabel, QSlider, QPushButton, QFrame, QGroupBox,
-    QSizePolicy, QDoubleSpinBox, QTextEdit, QScrollArea
+    QSizePolicy, QDoubleSpinBox, QTextEdit, QScrollArea, QTabWidget
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QFont, QColor, QPalette, QTextCursor
@@ -48,13 +50,13 @@ from PyQt5.QtGui import QFont, QColor, QPalette, QTextCursor
 # ─── Joint Configuration ─────────────────────────────────────────────
 JOINT_CONFIG = [
     # (label, kp_min, kp_max, kp_default, kd_min, kd_max, kd_default)
-    ("J1 — Shoulder Yaw",   15.0, 150.0, 70.0,   0.50, 5.0, 2.75),
-    ("J2 — Shoulder Pitch",  15.0, 150.0, 70.0,   0.50, 5.0, 2.50),
-    ("J3 — Shoulder Roll",   15.0, 150.0, 70.0,   0.40, 5.0, 2.00),
-    ("J4 — Elbow",           12.0, 120.0, 60.0,   0.40, 5.0, 2.00),
-    ("J5 — Wrist Roll",      3.0,  30.0,  10.0,   0.15, 2.0, 0.70),
-    ("J6 — Wrist Yaw",       3.0,  30.0,  10.0,   0.12, 2.0, 0.60),
-    ("J7 — Wrist Pitch",     3.0,  30.0,  10.0,   0.10, 2.0, 0.50),
+    ("J1 — Shoulder Yaw",   12.0, 150.0, 70.0,   0.50, 5.0, 2.75),
+    ("J2 — Shoulder Pitch",  12.0, 150.0, 70.0,   0.50, 5.0, 2.50),
+    ("J3 — Shoulder Roll",   12.0, 150.0, 70.0,   0.40, 5.0, 2.00),
+    ("J4 — Elbow",           3.0,  120.0, 60.0,   0.40, 5.0, 2.00),
+    ("J5 — Wrist Roll",      2.0,  30.0,  10.0,   0.15, 2.0, 0.70),
+    ("J6 — Wrist Yaw",       2.0,  30.0,  10.0,   0.12, 2.0, 0.60),
+    ("J7 — Wrist Pitch",     2.0,  30.0,  10.0,   0.10, 2.0, 0.50),
 ]
 
 # Fallback joint limits (rad) if URDF parsing fails
@@ -236,6 +238,37 @@ QPushButton:hover {
 }
 """
 
+TEACH_ON_STYLE = """
+QPushButton {
+    background-color: #6b3fa0;
+    color: white;
+    border: 2px solid #9b59b6;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-size: 14px;
+    font-weight: bold;
+}
+QPushButton:hover {
+    background-color: #9b59b6;
+}
+"""
+
+TEACH_OFF_STYLE = """
+QPushButton {
+    background-color: #2a2040;
+    color: #a888cc;
+    border: 2px solid #5a4a6a;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-size: 14px;
+    font-weight: bold;
+}
+QPushButton:hover {
+    background-color: #3a3050;
+    border: 2px solid #9b59b6;
+}
+"""
+
 RUN_BTN_STYLE = """
 QPushButton {
     background-color: #2563a8;
@@ -302,6 +335,12 @@ class ImpedanceGuiNode(Node):
         self.side = side
         prefix = f"/{side}_compliance_controller"
         self.controller_name = f"{side}_compliance_controller"
+
+        # Impedance phase publisher (teach/transit switching)
+        self.phase_pub = self.create_publisher(
+            String, "/impedance_phase", 10
+        )
+        self.teach_mode = False
 
         # Impedance params publisher
         self.pub = self.create_publisher(
@@ -437,6 +476,14 @@ class ImpedanceGuiNode(Node):
         """Send arm to zero position."""
         return self.send_target([0.0] * 7, 3.0)
 
+    def publish_phase(self, phase: str):
+        """Publish impedance phase (teach/transit/etc)."""
+        msg = String()
+        msg.data = phase
+        self.phase_pub.publish(msg)
+        self.teach_mode = (phase == "teach")
+        self.get_logger().info(f"Phase published: {phase}")
+
     def switch_controller(self, activate: bool):
         """Activate or deactivate the compliance controller."""
         if not self.switch_client.wait_for_service(timeout_sec=2.0):
@@ -476,6 +523,7 @@ class ImpedanceGui(QMainWindow):
         self.kp_labels = []
         self.kd_labels = []
         self.tau_labels = []
+        self.range_labels = []  # joint range labels (updated from URDF)
 
         # Joint angle spinboxes
         self.joint_spinboxes = []
@@ -515,6 +563,13 @@ class ImpedanceGui(QMainWindow):
         title.setStyleSheet("color: #e0e0e0; padding: 4px;")
         header.addWidget(title)
         header.addStretch()
+
+        # Teach mode toggle
+        self.teach_btn = QPushButton("🎓 Teach Mode: OFF")
+        self.teach_btn.setStyleSheet(TEACH_OFF_STYLE)
+        self.teach_btn.setFixedSize(220, 50)
+        self.teach_btn.clicked.connect(self._on_toggle_teach)
+        header.addWidget(self.teach_btn)
 
         self.estop_btn = QPushButton("⬛  E-STOP")
         self.estop_btn.setStyleSheet(ESTOP_STYLE)
@@ -576,6 +631,7 @@ class ImpedanceGui(QMainWindow):
             range_lbl.setFixedWidth(68)
             range_lbl.setAlignment(Qt.AlignCenter)
             target_grid.addWidget(range_lbl, row, col_base + 1)
+            self.range_labels.append(range_lbl)
 
             spin = QDoubleSpinBox()
             spin.setMinimum(lo_deg)
@@ -908,7 +964,7 @@ class ImpedanceGui(QMainWindow):
     # ── URDF joint limits update ──
 
     def _update_joint_limits(self):
-        """Update spinbox limits when URDF is received."""
+        """Update spinbox limits and range labels when URDF is received."""
         if self.node.urdf_received:
             for i in range(7):
                 lo_rad, hi_rad = self.node.joint_limits_rad[i]
@@ -916,16 +972,21 @@ class ImpedanceGui(QMainWindow):
                 hi_deg = math.degrees(hi_rad)
                 self.joint_spinboxes[i].setMinimum(lo_deg)
                 self.joint_spinboxes[i].setMaximum(hi_deg)
-            self._log("✅ Joint limits loaded from URDF")
+                if i < len(self.range_labels):
+                    self.range_labels[i].setText(f"{lo_deg:.0f}~{hi_deg:.0f}°")
+            self._log("\u2705 Joint limits loaded from URDF")
             for i in range(7):
                 lo, hi = self.node.joint_limits_rad[i]
-                self._log(f"   J{i+1}: {math.degrees(lo):.1f}° ~ {math.degrees(hi):.1f}°")
+                self._log(f"   J{i+1}: {math.degrees(lo):.1f}\u00b0 ~ {math.degrees(hi):.1f}\u00b0")
             self.limits_timer.stop()  # stop polling
 
     # ── Controller toggle ──
 
     def _on_toggle_controller(self):
         if self.node.controller_active:
+            # If in teach mode, exit first
+            if self.node.teach_mode:
+                self._on_toggle_teach()
             # Deactivate
             success = self.node.switch_controller(activate=False)
             if success:
@@ -997,6 +1058,9 @@ class ImpedanceGui(QMainWindow):
         self.node.publish_impedance(kp, kd)
 
     def _apply_preset(self, name):
+        # If in teach mode, exit it first since presets override gains
+        if self.node.teach_mode:
+            self._on_toggle_teach()
         preset = PRESETS[name]
         for i in range(7):
             self.kp_sliders[i].blockSignals(True)
@@ -1104,6 +1168,37 @@ class ImpedanceGui(QMainWindow):
         self.estop_btn.setText("⬛  E-STOP")
         self.estop_btn.setStyleSheet(ESTOP_STYLE)
 
+    def _on_toggle_teach(self):
+        """Toggle teach mode on/off."""
+        if self.node.teach_mode:
+            self.node.publish_phase("transit")
+            self.teach_btn.setText("🎓 Teach Mode: OFF")
+            self.teach_btn.setStyleSheet(TEACH_OFF_STYLE)
+            # Re-enable sliders
+            for s in self.kp_sliders + self.kd_sliders:
+                s.setEnabled(True)
+            self._apply_preset("🔒 Full Stiff (Default)")
+            self._log("🎓 Teach mode OFF — transit gains restored")
+        else:
+            self.node.publish_phase("teach")
+            self.teach_btn.setText("🎓 Teach Mode: ON")
+            self.teach_btn.setStyleSheet(TEACH_ON_STYLE)
+            # Update sliders to show teach values
+            teach_kp = [15.0, 15.0, 15.0, 5.0, 3.0, 3.0, 3.0]
+            teach_kd = [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]
+            for i in range(7):
+                self.kp_sliders[i].blockSignals(True)
+                self.kd_sliders[i].blockSignals(True)
+                self.kp_sliders[i].setValue(int(teach_kp[i] * 10))
+                self.kd_sliders[i].setValue(int(teach_kd[i] * 100))
+                self.kp_labels[i].setText(f"{teach_kp[i]:.1f}")
+                self.kd_labels[i].setText(f"{teach_kd[i]:.2f}")
+                self.kp_sliders[i].setEnabled(False)
+                self.kd_sliders[i].setEnabled(False)
+                self.kp_sliders[i].blockSignals(False)
+                self.kd_sliders[i].blockSignals(False)
+            self._log("🎓 Teach mode ON — arm floats freely")
+
     def _poll_tau_ff(self):
         self.tau_ff_updated.emit(self.node.tau_ff)
 
@@ -1121,16 +1216,23 @@ class ImpedanceGui(QMainWindow):
 # ─── Main ─────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(description="OpenArm Impedance GUI")
-    parser.add_argument("--side", default="right", choices=["left", "right"],
+    parser.add_argument("--side", default="right",
+                        choices=["left", "right", "both"],
                         help="Which arm to control")
     args, _ = parser.parse_known_args()
 
     rclpy.init()
-    ros_node = ImpedanceGuiNode(args.side)
 
-    # Spin ROS in a background thread
+    sides = ["left", "right"] if args.side == "both" else [args.side]
+    nodes = []
+    for side in sides:
+        node = ImpedanceGuiNode(side)
+        nodes.append(node)
+
+    # Spin all ROS nodes in a background thread
     executor = SingleThreadedExecutor()
-    executor.add_node(ros_node)
+    for node in nodes:
+        executor.add_node(node)
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
 
@@ -1138,7 +1240,6 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
-    # Set dark palette
     palette = QPalette()
     palette.setColor(QPalette.Window, QColor("#1a1d23"))
     palette.setColor(QPalette.WindowText, QColor("#e0e0e0"))
@@ -1150,12 +1251,126 @@ def main():
     palette.setColor(QPalette.Highlight, QColor("#5b9cf5"))
     app.setPalette(palette)
 
-    gui = ImpedanceGui(ros_node)
-    gui.show()
+    if len(sides) == 1:
+        # Single arm mode
+        gui = ImpedanceGui(nodes[0])
+        gui.show()
+    else:
+        # Bimanual mode: single window with tabs
+        main_win = QMainWindow()
+        main_win.setWindowTitle("OpenArm Compliance Controller — Bimanual")
+        main_win.setMinimumSize(1100, 900)
+        main_win.setStyleSheet(DARK_STYLE)
+
+        central = QWidget()
+        main_win.setCentralWidget(central)
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
+
+        # Shared header with teach toggle + E-STOP
+        header = QHBoxLayout()
+        title = QLabel("OpenArm Bimanual Compliance Controller")
+        title.setFont(QFont("Inter", 16, QFont.Bold))
+        title.setStyleSheet("color: #e0e0e0; padding: 4px;")
+        header.addWidget(title)
+        header.addStretch()
+
+        teach_btn = QPushButton("\U0001f393 Teach Mode: OFF")
+        teach_btn.setStyleSheet(TEACH_OFF_STYLE)
+        teach_btn.setFixedSize(220, 44)
+        header.addWidget(teach_btn)
+
+        estop_btn = QPushButton("\u2b1b  E-STOP")
+        estop_btn.setStyleSheet(ESTOP_STYLE)
+        estop_btn.setFixedSize(200, 44)
+        header.addWidget(estop_btn)
+        layout.addLayout(header)
+
+        # Tabs
+        tabs = QTabWidget()
+        tabs.setStyleSheet("""
+            QTabWidget::pane { border: 1px solid #2a2f38; border-radius: 4px; }
+            QTabBar::tab { background: #22262e; color: #888; padding: 8px 24px;
+                           border: 1px solid #2a2f38; border-bottom: none;
+                           border-top-left-radius: 6px; border-top-right-radius: 6px;
+                           font-size: 14px; font-weight: bold; }
+            QTabBar::tab:selected { background: #1a1d23; color: #5b9cf5;
+                                    border-bottom: 2px solid #5b9cf5; }
+            QTabBar::tab:hover { background: #2a3040; }
+        """)
+
+        guis = []
+        for node in nodes:
+            gui = ImpedanceGui(node)
+            # Hide per-tab teach/estop buttons (shared ones are in header)
+            gui.teach_btn.hide()
+            gui.estop_btn.hide()
+            # Grab the central widget content to embed in tab
+            tab_widget = gui.centralWidget()
+            arrow = "\u2b05" if node.side == "left" else "\u27a1"
+            tabs.addTab(tab_widget, f"{arrow} {node.side.capitalize()} Arm")
+            guis.append(gui)
+
+        layout.addWidget(tabs)
+
+        # Wire shared teach toggle
+        teach_active = [False]
+
+        def on_teach():
+            if teach_active[0]:
+                for g in guis:
+                    g.node.publish_phase("transit")
+                teach_btn.setText("\U0001f393 Teach Mode: OFF")
+                teach_btn.setStyleSheet(TEACH_OFF_STYLE)
+                for g in guis:
+                    for s in g.kp_sliders + g.kd_sliders:
+                        s.setEnabled(True)
+                    g._apply_preset("\U0001f512 Full Stiff (Default)")
+                    g._log("\U0001f393 Teach mode OFF")
+                teach_active[0] = False
+            else:
+                teach_kp = [12.0, 12.0, 12.0, 3.0, 2.0, 2.0, 2.0]
+                teach_kd = [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]
+                for g in guis:
+                    g.node.publish_phase("teach")
+                    # Publish teach gains: 7 arm kp + grip_kp + 7 arm kd + grip_kd
+                    msg = Float64MultiArray()
+                    msg.data = teach_kp + [0.3] + teach_kd + [0.05]
+                    g.node.pub.publish(msg)
+                    for i in range(7):
+                        g.kp_sliders[i].blockSignals(True)
+                        g.kd_sliders[i].blockSignals(True)
+                        g.kp_sliders[i].setValue(int(teach_kp[i] * 10))
+                        g.kd_sliders[i].setValue(int(teach_kd[i] * 100))
+                        g.kp_labels[i].setText(f"{teach_kp[i]:.1f}")
+                        g.kd_labels[i].setText(f"{teach_kd[i]:.2f}")
+                        g.kp_sliders[i].setEnabled(False)
+                        g.kd_sliders[i].setEnabled(False)
+                        g.kp_sliders[i].blockSignals(False)
+                        g.kd_sliders[i].blockSignals(False)
+                    g._log("\U0001f393 Teach mode ON")
+                teach_btn.setText("\U0001f393 Teach Mode: ON")
+                teach_btn.setStyleSheet(TEACH_ON_STYLE)
+                teach_active[0] = True
+
+        teach_btn.clicked.connect(on_teach)
+
+        # Wire shared E-STOP
+        def on_estop():
+            if teach_active[0]:
+                on_teach()  # exit teach mode first
+            for g in guis:
+                g._on_estop()
+
+        estop_btn.clicked.connect(on_estop)
+
+        main_win.show()
 
     exit_code = app.exec_()
 
-    ros_node.destroy_node()
+    for node in nodes:
+        node.destroy_node()
     rclpy.shutdown()
     sys.exit(exit_code)
 

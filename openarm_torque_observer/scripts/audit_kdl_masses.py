@@ -31,7 +31,7 @@ from torque_observer_node import kdl_tree_from_urdf_string
 
 def generate_urdf(bimanual: bool) -> str:
     """Generate URDF string from xacro."""
-    xacro_path = '/home/nirvana-ai/ros2_ws/src/openarm_description/urdf/robot/v10.urdf.xacro'
+    xacro_path = '/home/user/ros2_ws/src/openarm_description/urdf/robot/v10.urdf.xacro'
     cmd = ['xacro', xacro_path]
     if bimanual:
         cmd.append('bimanual:=true')

@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent-L: Robotic Lecturer Dashboard</title>
+    <!-- Google Fonts for premium typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <!-- FontAwesome icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Marked library for dynamic Markdown parsing in chat -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="brand">
+                <i class="fa-solid fa-robot brand-logo"></i>
+                <div class="brand-text">
+                    <h1>AGENT-L</h1>
+                    <span>Robotic Lecturer</span>
+                </div>
+            </div>
+            
+            <nav class="nav-menu">
+                <button class="nav-btn active" data-tab="chat">
+                    <i class="fa-solid fa-comments"></i>
+                    <span>AI Chat</span>
+                </button>
+                <button class="nav-btn" data-tab="graphs">
+                    <i class="fa-solid fa-diagram-project"></i>
+                    <span>Node Graph</span>
+                </button>
+                <button class="nav-btn" data-tab="simulator">
+                    <i class="fa-solid fa-wave-square"></i>
+                    <span>Physics Simulator</span>
+                </button>
+                <button class="nav-btn" data-tab="docs">
+                    <i class="fa-solid fa-book-open"></i>
+                    <span>System DB</span>
+                </button>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <button class="nav-btn settings-btn" id="open-settings">
+                    <i class="fa-solid fa-gear"></i>
+                    <span>API Settings</span>
+                </button>
+                <div class="status-indicator">
+                    <span class="pulse-dot green"></span>
+                    <span id="system-status-text">Server: Online</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- HEADER -->
+            <header class="app-header">
+                <div class="header-title">
+                    <h2 id="current-tab-title">AI Chat with Dr. L</h2>
+                    <p id="current-tab-desc">Robotic Kinematics & Controls Knowledge Base</p>
+                </div>
+                <div class="header-widgets">
+                    <div class="stat-badge">
+                        <span class="label">Platform</span>
+                        <span class="val">OpenArm V10</span>
+                    </div>
+                    <div class="stat-badge">
+                        <span class="label">Control Rate</span>
+                        <span class="val">100Hz VIC</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- TAB 1: AI CHAT INTERFACE -->
+            <section class="tab-panel active" id="tab-chat">
+                <div class="chat-container">
+                    <div class="chat-messages" id="chat-messages-box">
+                        <!-- Welcome message from Dr. L -->
+                        <div class="chat-msg system">
+                            <div class="avatar"><i class="fa-solid fa-user-tie"></i></div>
+                            <div class="bubble">
+                                <p><strong>Dr. L (Lecturer):</strong> Good day, team! I am fully bootstrapped and connected to the OpenArm V10 database. Ask me anything about:</p>
+                                <ul>
+                                    <li>The joint-space impedance law and its physics: <code>τ_cmd = τ_ff + Kp·Δq + Kd·Δdq</code></li>
+                                    <li>Why we use TRAC-IK (SQP + KDL dual strategy) instead of KDL on 7-DOF arms</li>
+                                    <li>Our bimanual teach-mode infrastructure & gain preset scheduling</li>
+                                    <li>How the VLA server is connected via a Python 3.12 ↔ Humble UDP bridge</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-input-bar">
+                        <input type="text" id="chat-input-field" placeholder="Ask Dr. L a question (e.g., 'Why does KDL fail on a 7-DOF arm?')..." autocomplete="off">
+                        <button id="send-chat-btn"><i class="fa-solid fa-paper-plane"></i></button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 2: SYSTEM GRAPHS -->
+            <section class="tab-panel" id="tab-graphs">
+                <div class="panel-card scrollable">
+                    <h3>Interactive Visual Schematics</h3>
+                    <p class="section-desc">Full architectural maps of our OpenArm V10 system. Click the selectors to switch diagrams.</p>
+                    
+                    <div class="carousel-controls">
+                        <button class="carousel-btn active" data-img="graph">Node Graph</button>
+                        <button class="carousel-btn" data-img="arch">ROS 2 Control</button>
+                        <button class="carousel-btn" data-img="paradox">Throughput vs Latency</button>
+                    </div>
+
+                    <div class="graph-display-container">
+                        <img src="assets/openarm_node_graph.png" id="carousel-image-view" alt="System Node Graph" class="diagram-img">
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 3: DYNAMIC PHYSICS SIMULATOR -->
+            <section class="tab-panel" id="tab-simulator">
+                <div class="simulator-layout">
+                    <!-- Control Panel -->
+                    <div class="panel-card sim-controls">
+                        <h3>Impedance Parameter Tuning</h3>
+                        <p class="section-desc">Simulate a single OpenArm rotary joint under our impedance law in real-time. Pull the joint on the right to disturb it, and tune the sliders to observe physical behavior.</p>
+                        
+                        <div class="control-group">
+                            <div class="slider-header">
+                                <label for="sim-kp">Stiffness Gain (Kp)</label>
+                                <span class="slider-val" id="kp-val">50.0</span>
+                            </div>
+                            <input type="range" id="sim-kp" min="0" max="200" step="1" value="50">
+                            <div class="slider-desc">Determines virtual spring stiffness. High Kp = rigid trajectory tracking; low Kp = compliant touch.</div>
+                        </div>
+
+                        <div class="control-group">
+                            <div class="slider-header">
+                                <label for="sim-kd">Damping Gain (Kd)</label>
+                                <span class="slider-val" id="kd-val">2.5</span>
+                            </div>
+                            <input type="range" id="sim-kd" min="0" max="20" step="0.1" value="2.5">
+                            <div class="slider-desc">Virtual shock absorber. Prevents wild oscillations. Tune to reach target smoothly.</div>
+                        </div>
+
+                        <div class="control-group">
+                            <div class="slider-header">
+                                <label for="sim-mass">Payload Mass (Mass Injection)</label>
+                                <span class="slider-val" id="mass-val">1.0 kg</span>
+                            </div>
+                            <input type="range" id="sim-mass" min="0" max="5" step="0.1" value="1">
+                            <div class="slider-desc">Inertia of the arm segment. Adding mass requires higher damping to prevent overshoot.</div>
+                        </div>
+
+                        <div class="preset-buttons">
+                            <button class="preset-btn" id="preset-stiff">Transit (Rigid)</button>
+                            <button class="preset-btn" id="preset-soft">Contact (Soft)</button>
+                            <button class="preset-btn" id="preset-teach">Teach (Floating)</button>
+                        </div>
+                    </div>
+
+                    <!-- Live Physics View -->
+                    <div class="panel-card sim-view">
+                        <div class="sim-header">
+                            <h3>Live Physical Oscillation</h3>
+                            <span class="badge" id="damping-status">Stable</span>
+                        </div>
+                        <div class="canvas-container">
+                            <canvas id="physics-canvas"></canvas>
+                        </div>
+                        <div class="sim-legend">
+                            <span class="legend-item"><span class="dot des"></span>Target Pose</span>
+                            <span class="legend-item"><span class="dot act"></span>Actual Joint Position</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- TAB 4: SYSTEM DATABASE -->
+            <section class="tab-panel" id="tab-docs">
+                <div class="docs-layout">
+                    <div class="docs-sidebar">
+                        <button class="doc-link-btn active" data-file="architecture">ARCHITECTURE.md</button>
+                        <button class="doc-link-btn" data-file="lecturer">AGENT_L_LECTURER.md</button>
+                        <button class="doc-link-btn" data-file="complete_node_graph">COMPLETE_NODE_GRAPH.md</button>
+                        <button class="doc-link-btn" data-file="proprioceptive_force">PROPRIOCEPTIVE_FORCE.md</button>
+                        <button class="doc-link-btn" data-file="teach_mode_guide">Enable_Teaching_Biarm.md</button>
+                    </div>
+                    <div class="panel-card docs-viewer scrollable" id="doc-render-area">
+                        <p class="loader"><i class="fa-solid fa-spinner fa-spin"></i> Loading repository files...</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- API Settings Modal -->
+    <div class="modal-overlay" id="settings-modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3><i class="fa-solid fa-gear"></i> Gemini API Configurations</h3>
+                <button class="close-modal-btn" id="close-settings"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <p>To use the AI Chat feature, Agent-L requires a <strong>Gemini API Key</strong>. It is saved locally in your browser's local storage and is only sent to the local FastAPI server for processing.</p>
+                <div class="form-group">
+                    <label for="gemini-api-key-input">Gemini API Key</label>
+                    <input type="password" id="gemini-api-key-input" placeholder="AIzaSy...">
+                </div>
+                <div class="key-status-msg" id="key-status-text">Checking server state...</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="clear-key-btn">Clear Saved Key</button>
+                <button class="btn btn-primary" id="save-key-btn">Save Key</button>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

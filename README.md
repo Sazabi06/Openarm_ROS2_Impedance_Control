@@ -1,9 +1,19 @@
-# OpenArm Impedance Controller
+# 🤖 OpenArm Impedance Controller
 
-**Variable impedance control for the [OpenArm V10](https://openarm.dev) bimanual robot — enabling safe, compliant human-robot interaction.**
+**Variable impedance control for the [OpenArm V10](https://openarm.dev) bimanual robot — enabling safe, compliant human-robot interaction and teach-mode data collection.**
 
 [![ROS 2](https://img.shields.io/badge/ROS%202-Humble-blue)](https://docs.ros.org/en/humble/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-green)](LICENSE)
+
+### Project Status
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| 1 | Impedance controller + gravity comp + GUI | ✅ Complete |
+| 2 | Vision pipeline + IK executor + gripper impedance | ✅ Complete |
+| 3 | Teach mode + data collection + bimanual support | ✅ Complete |
+
+> **VLA fine-tuning and inference** have been moved to a separate repository: [Openarm_VLA](https://github.com/Sazabi06/Openarm_VLA)
 
 ---
 
@@ -52,23 +62,23 @@ This repo contains three ROS 2 packages that work together:
 ┌─────────────────────────────────────────────────────────────────┐
 │                    OpenArm Control Stack                        │
 │                                                                 │
-│  ┌──────────────────────┐    ┌──────────────────────────────┐   │
-│  │ JointTrajectory      │    │ ComplianceController         │   │
-│  │ Controller           │    │ (this repo)                  │   │
-│  │                      │    │                              │   │
-│  │ Writes:              │    │ Writes:                      │   │
-│  │  • position          │    │  • effort (τ_ff)             │   │
-│  │  • velocity          │    │  • stiffness (Kp)            │   │
-│  │                      │    │  • damping (Kd)              │   │
-│  └──────────┬───────────┘    └──────────────┬───────────────┘   │
+│  ┌──────────────────────┐    ┌──────────────────────────────┐  │
+│  │ JointTrajectory      │    │ ComplianceController         │  │
+│  │ Controller           │    │ (this repo)                  │  │
+│  │                      │    │                              │  │
+│  │ Writes:              │    │ Writes:                      │  │
+│  │  • position          │    │  • effort (τ_ff)             │  │
+│  │  • velocity          │    │  • stiffness (Kp)            │  │
+│  │                      │    │  • damping (Kd)              │  │
+│  └──────────┬───────────┘    └──────────────┬───────────────┘  │
 │             │                               │                   │
-│             └─────────────┬─────────────────┘                   │
-│                           ▼                                     │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │              Hardware Interface (CAN-FD)                │    │
-│  │   Combines into MIT frame: {Kp, Kd, q_des, v_des, τ_ff} │    │
-│  │              → Damiao Actuators                         │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│             └──────────┬────────────────────┘                   │
+│                        ▼                                        │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │              Hardware Interface (CAN-FD)                │   │
+│  │   Combines into MIT frame: {Kp, Kd, q_des, v_des, τ_ff}│   │
+│  │              → Damiao Actuators                         │   │
+│  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -76,9 +86,10 @@ This repo contains three ROS 2 packages that work together:
 
 | Package | Description |
 |---------|-------------|
-| **`openarm_compliance_controller`** | Main `ros2_control` plugin. Computes τ_ff using KDL dynamics (gravity + Coriolis + friction) and manages dynamic Kp/Kd with safety limits. Includes a PyQt5 tuning GUI. |
+| **`openarm_compliance_controller`** | Main `ros2_control` plugin. Computes τ_ff using KDL dynamics (gravity + Coriolis + friction) and manages dynamic Kp/Kd with safety limits. Includes PyQt5 tuning GUI, Web GUI, bimanual teach mode, data collection scripts, and impedance profile manager. |
 | **`openarm_torque_observer`** | Python-based torque observer for offline model validation. Compares KDL-predicted torque with measured motor current to calibrate scale factors. |
 | **`openarm_hw_control`** | Legacy impedance controller prototype and thermal watchdog. |
+| **`skills/`** | AI Agent Skill Files — impedance control theory, hardware specs, motion planning, and coding guidelines for knowledge transfer. |
 
 ---
 
@@ -263,15 +274,45 @@ Where:
 
 ## Testing
 
-The full test plan (simulation + real hardware) is in:
+| Test Suite | File | Tests |
+|------------|------|-------|
+| Impedance controller (Phase 1-2) | [TEST.md](openarm_compliance_controller/TEST.md) | 8 sim + 8 HW tests + 3 demos |
+| Left arm hardware | [TEST_LEFT_ARM_HARDWARE.md](openarm_compliance_controller/TEST_LEFT_ARM_HARDWARE.md) | Bimanual HW validation |
+| Teach mode setup | [Enable_Teaching_Biarm.md](openarm_compliance_controller/Enable_Teaching_Biarm.md) | Step-by-step teach mode guide |
 
-📋 **[TEST.md](openarm_compliance_controller/TEST.md)**
+---
 
-It includes:
-- 8 simulation tests with exact commands and expected outputs
-- 8 real hardware tests with step-by-step instructions
-- 3 demo scenarios (Gravity Compensation, Compliant Handshake, Variable Stiffness Pick-and-Place)
-- Complete troubleshooting guide
+## Data Collection (Teach Mode)
+
+### Teach Mode → Record → Convert
+
+```
+┌─────────────┐    ┌──────────────┐    ┌────────────────┐
+│ Teach Mode  │ →  │ Record       │ →  │ Convert to     │ → (see Openarm_VLA repo)
+│ (drag arm)  │    │ (30Hz joints │    │ LeRobot format │
+│             │    │  + 2 cameras)│    │ (parquet)      │
+└─────────────┘    └──────────────┘    └────────────────┘
+```
+
+### Scripts
+
+| Script | Purpose |
+|--------|--------|
+| `impedance_profile_manager.py` | Named impedance profiles (transit, teach, contact) |
+| `teach_mode.py` | Activates teach mode for drag-to-teach |
+| `record_episode.py` | Records joints + 2 cameras at 30Hz |
+| `replay_episode.py` | Replays recorded episodes via JTC |
+| `convert_to_lerobot.py` | Converts to LeRobot v3 parquet format |
+| `record_bimanual_episode.py` | Bimanual episode recording (both arms) |
+| `convert_bimanual_to_lerobot.py` | Bimanual data → LeRobot format |
+| `camera_viewer.py` | Dual-camera live preview (head + wrist) |
+| `cartesian_goal_executor.py` | IK-based Cartesian goal reaching |
+| `impedance_demo_ab.py` | A-B motion demo with impedance control |
+| `force_monitor.py` | Real-time external force estimation |
+| `wrist_camera_demo.py` | Wrist camera depth visualization |
+| `verify_joint_calibration.py` | Joint calibration verification |
+| `diagnose_left_arm.py` | Left arm diagnostic tool |
+| `diagnose_urdf_math.py` | URDF math verification |
 
 ---
 
@@ -304,42 +345,37 @@ This enables the robot to:
 
 ```
 Openarm_Impedance_Controller/
-├── README.md                          # This file
-├── openarm_compliance_controller/     # Main compliance controller
-│   ├── CMakeLists.txt
-│   ├── package.xml
-│   ├── openarm_compliance_controller.xml   # pluginlib descriptor
+├── README.md                              # This file
+├── LICENSE                                # Apache 2.0
+├── .gitignore
+├── openarm_compliance_controller/         # Main compliance controller (C++)
+│   ├── src/compliance_controller.cpp      # KDL dynamics + impedance logic
+│   ├── include/.../compliance_controller.hpp
 │   ├── config/
-│   │   ├── compliance_controller.yaml      # Gains, limits, friction params
-│   │   └── gripper_stiffness_controller.yaml  # Gripper Kp/Kd FCC config
-│   ├── include/openarm_compliance_controller/
-│   │   └── compliance_controller.hpp       # Controller header
-│   ├── src/
-│   │   └── compliance_controller.cpp       # KDL dynamics + impedance logic
-│   ├── scripts/
-│   │   ├── impedance_gui.py                # PyQt5 tuning GUI (arm + gripper)
-│   │   └── motor_feedback_diagnostic.py    # Hardware diagnostic tool
-│   ├── launch/
-│   │   └── compliance.launch.py
-│   ├── TEST.md                             # Full test plan
-│   ├── IMPLEMENTATION_PLAN.md              # Roadmap
-│   └── AGENT_TASKS.md                      # Multi-agent task delegation
-├── openarm_torque_observer/           # Torque model validation
-│   ├── openarm_torque_observer/
-│   │   └── torque_observer_node.py         # KDL-based torque observer
-│   ├── scripts/
-│   │   └── audit_kdl_masses.py             # URDF mass auditing tool
-│   └── config/
-│       └── friction_params.yaml
-├── openarm_hw_control/                # Legacy impedance controller
-│   ├── src/
-│   │   ├── impedance_controller.cpp
-│   │   └── thermal_watchdog.cpp
-│   └── include/openarm_hw_control/
-│       ├── impedance_controller.hpp
-│       └── low_pass_filter.hpp
-└── patches/
-    └── openarm.bimanual.ros2_control.xacro  # URDF fix for gripper interfaces
+│   │   ├── compliance_controller.yaml     # Gains, limits, friction params
+│   │   └── gripper_stiffness_controller.yaml
+│   ├── scripts/                           # 20+ Python scripts (see table above)
+│   ├── web/                               # Web GUI for impedance tuning
+│   │   ├── server.py
+│   │   └── static/ (app.js, index.html, style.css)
+│   ├── launch/compliance.launch.py
+│   ├── AGENT_TASKS.md                     # Multi-agent task delegation
+│   ├── AGENT_O_ORCHESTRATOR.md            # Project orchestrator state
+│   ├── AGENT_C2_VISION.md                 # Vision/VLA agent tasks
+│   ├── AGENT_L_LECTURER.md                # Technical lecturer agent
+│   ├── Enable_Teaching_Biarm.md           # Teach mode setup guide
+│   ├── PROPRIOCEPTIVE_FORCE.md            # Force estimation documentation
+│   ├── TEST.md                            # Full test plan (Phase 1-2)
+│   └── IMPLEMENTATION_PLAN.md             # Architecture roadmap
+├── openarm_torque_observer/               # Torque model validation
+├── openarm_hw_control/                    # Legacy impedance controller
+├── patches/                               # URDF fixes
+└── skills/                                # AI Agent knowledge files
+    ├── impedance-control/SKILL.md
+    ├── openarm-hardware/SKILL.md
+    ├── motion-planning-ik/SKILL.md
+    ├── karpathy-guidelines/SKILL.md
+    └── xarm5-admittance-control/SKILL.md
 ```
 
 ---
@@ -347,6 +383,14 @@ Openarm_Impedance_Controller/
 ## License
 
 Apache License 2.0 — See individual package files for details.
+
+## Related Repositories
+
+| Repository | Description |
+|------------|-------------|
+| [Openarm_VLA](https://github.com/Sazabi06/Openarm_VLA) | VLA fine-tuning & inference (SmolVLA, pi-0.5, GR00T N1.7) |
+| [Openarm_ROS2_Vision](https://github.com/Sazabi06/Openarm_ROS2_Vision) | Camera pipeline, YOLO, hand-eye calibration |
+| [Openarm-ROS2-robot-control](https://github.com/Sazabi06/Openarm-ROS2-robot-control) | Base hardware drivers, URDF, MoveIt config |
 
 ## Acknowledgments
 

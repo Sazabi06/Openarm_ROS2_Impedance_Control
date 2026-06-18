@@ -19,17 +19,17 @@ right_compliance_controller:
     root_link: "openarm_body_link0"
     tip_link: "openarm_right_hand"
 
-    # Calibration: scale factors from hardware validation (Step 3)
-    # J2: model overpredicts by ~4%, J4: model overpredicts by ~33%
-    tau_ff_scale: [1.0, 0.96, 1.0, 0.67, 1.0, 1.0, 1.0]
+    # Calibration: scale factors tuned on real hardware (teach mode validated)
+    # J1: 1.05 (slight over-comp needed above 90°), J2: 1.0, J4: 1.0
+    tau_ff_scale: [1.05, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
     # Friction model: tau_f = Fc*tanh(0.1*k*dq) + Fv*dq + Fo
     # From openarm_teleop calibration (follower.yaml)
     friction:
-      Fc: [0.306,   0.306,   0.40,    0.166,   0.050,   0.093,   0.172]
+      Fc: [0.306,   0.306,   0.40,    0.166,   0.050,   0.0,     0.172]
       k:  [28.417,  28.417,  29.065,  130.038, 151.771, 242.287, 7.888]
       Fv: [0.063,   0.063,   0.604,   0.813,   0.029,   0.072,   0.084]
-      Fo: [0.088,   0.088,   0.008,  -0.058,   0.005,   0.009,  -0.059]
+      Fo: [0.088,   0.088,   0.008,  -0.058,   0.005,   0.0,     0.0]
 
     # Default gains (startup values = current conservative defaults)
     kp_default: [70.0, 70.0, 70.0, 60.0, 10.0, 10.0, 10.0]
@@ -41,13 +41,36 @@ right_compliance_controller:
     kd_max: [5.0, 5.0, 5.0, 5.0, 2.0, 2.0, 2.0]
 
     # Lower bounds: safety floor (matches hardware kp_min/kd_min)
-    kp_min: [15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0]
+    # MUST be below all preset Kp values — only teach profile should reach kp_min
+    kp_min: [12.0, 12.0, 12.0, 3.0, 2.0, 2.0, 2.0]
     kd_min: [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]
 
     # Rate limiting: max change per update cycle (100 Hz)
     # ΔKp = 2.0/cycle → full range sweep in ~35 cycles (0.35s)
     delta_kp_max: 2.0
     delta_kd_max: 0.1
+
+    # External force estimation: low-pass filter coefficient
+    # Higher = more responsive but noisier. 0.05 → ~0.8 Hz cutoff at 100 Hz
+    ext_force_alpha: 0.05
+
+    # Gripper impedance (Task 2.5): managed by the compliance controller
+    # at 100 Hz, eliminating the need for a separate gripper stiffness controller.
+    # Set to empty string "" to disable.
+    gripper_joint: "openarm_right_finger_joint1"
+    gripper_kp_default: 5.0     # startup stiffness (must match GRIPPER_KP in HW driver)
+    gripper_kd_default: 0.1     # startup damping (must match GRIPPER_KD in HW driver)
+    gripper_kp_max: 10.0        # max stiffness
+    gripper_kd_max: 2.0         # max damping
+
+    # Teach mode preset (Task 3.2s): values = kp_min/kd_min
+    # Arm floats weightlessly with gravity comp active.
+    # Human can freely drag all joints for data collection.
+    teach_mode:
+      kp: [15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0]
+      kd: [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]
+      grip_kp: 0.3
+      grip_kd: 0.05
 
 left_compliance_controller:
   ros__parameters:
@@ -63,19 +86,36 @@ left_compliance_controller:
     root_link: "openarm_body_link0"
     tip_link: "openarm_left_hand"
 
-    tau_ff_scale: [1.0, 0.96, 1.0, 0.67, 1.0, 1.0, 1.0]
+    tau_ff_scale: [1.05, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 
     friction:
       Fc: [0.306,   0.306,   0.40,    0.166,   0.050,   0.093,   0.172]
       k:  [28.417,  28.417,  29.065,  130.038, 151.771, 242.287, 7.888]
       Fv: [0.063,   0.063,   0.604,   0.813,   0.029,   0.072,   0.084]
-      Fo: [0.088,   0.088,   0.008,  -0.058,   0.005,   0.009,  -0.059]
+      Fo: [0.088,   0.088,   0.008,  -0.058,   0.005,   0.009,   0.0]
 
     kp_default: [70.0, 70.0, 70.0, 60.0, 10.0, 10.0, 10.0]
     kd_default: [2.75, 2.5, 2.0, 2.0, 0.7, 0.6, 0.5]
     kp_max: [150.0, 150.0, 150.0, 120.0, 30.0, 30.0, 30.0]
     kd_max: [5.0, 5.0, 5.0, 5.0, 2.0, 2.0, 2.0]
-    kp_min: [15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0]
+    kp_min: [12.0, 12.0, 12.0, 3.0, 2.0, 2.0, 2.0]
     kd_min: [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]
     delta_kp_max: 2.0
     delta_kd_max: 0.1
+
+    # External force estimation: low-pass filter coefficient
+    ext_force_alpha: 0.05
+
+    # Gripper impedance (Task 2.5)
+    gripper_joint: "openarm_left_finger_joint1"
+    gripper_kp_default: 5.0     # must match GRIPPER_KP in HW driver
+    gripper_kd_default: 0.1     # must match GRIPPER_KD in HW driver
+    gripper_kp_max: 10.0
+    gripper_kd_max: 2.0
+
+    # Teach mode preset (Task 3.2s)
+    teach_mode:
+      kp: [15.0, 15.0, 15.0, 12.0, 3.0, 3.0, 3.0]
+      kd: [0.5, 0.5, 0.4, 0.4, 0.15, 0.12, 0.1]
+      grip_kp: 0.3
+      grip_kd: 0.05

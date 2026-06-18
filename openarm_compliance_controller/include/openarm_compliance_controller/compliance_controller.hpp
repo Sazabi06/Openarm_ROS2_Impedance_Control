@@ -10,6 +10,7 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,8 @@
 #include <kdl/chain.hpp>
 #include <kdl/chaindynparam.hpp>
 #include <kdl/jntarray.hpp>
+#include <kdl/rigidbodyinertia.hpp>
+#include <kdl/segment.hpp>
 
 namespace openarm_compliance_controller {
 
@@ -60,10 +63,36 @@ class ComplianceController : public controller_interface::ControllerInterface {
   std::string root_link_;
   std::string tip_link_;
 
+  // --- Gripper integration (Task 2.5) ---
+  // Gripper sits beyond the KDL tip link — no dynamics, just Kp/Kd passthrough.
+  std::string gripper_joint_name_;
+  bool has_gripper_ = false;
+  double gripper_kp_current_ = 2.0;
+  double gripper_kd_current_ = 0.5;
+  double gripper_kp_desired_ = 2.0;
+  double gripper_kd_desired_ = 0.5;
+  double gripper_kp_default_ = 2.0;
+  double gripper_kd_default_ = 0.5;
+  double gripper_kp_max_ = 10.0;
+  double gripper_kd_max_ = 2.0;
+
   // --- KDL dynamics ---
-  KDL::Chain chain_;
-  std::unique_ptr<KDL::ChainDynParam> dyn_solver_;
+  KDL::Chain chain_;                             // original URDF chain (immutable after configure)
+  KDL::Chain active_chain_;                      // chain used by solver (may include payload)
+  std::unique_ptr<KDL::ChainDynParam> dyn_solver_; // references active_chain_ (NOT a copy!)
   bool kdl_initialized_ = false;
+
+  // --- Payload compensation ---
+  // Subscriber receives [mass_kg, cog_x, cog_y, cog_z] via ~/set_payload topic.
+  // Solver rebuild happens in the subscriber callback (non-RT thread),
+  // NOT in the 100 Hz update() loop, to avoid memory allocation in the RT path.
+  rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr payload_sub_;
+  double active_payload_mass_ = 0.0;             // last-applied payload mass
+  std::mutex chain_mutex_;                       // protects solver rebuild vs RT reads
+
+  /// Rebuild the dynamics solver with payload added to the last segment.
+  /// Called from subscriber callback (non-RT thread).
+  void rebuild_dynamics_with_payload(double mass, const KDL::Vector& cog);
 
   // --- Friction model: tau_f = Fc*tanh(0.1*k*dq) + Fv*dq + Fo ---
   std::vector<double> Fc_, k_coeff_, Fv_, Fo_;
@@ -82,6 +111,7 @@ class ComplianceController : public controller_interface::ControllerInterface {
 
   // --- RT-safe communication ---
   // Buffer stores [kp_0..kp_6, kd_0..kd_6] = 14 doubles
+  // With gripper: [kp_0..kp_6, kd_0..kd_6, grip_kp, grip_kd] = 16 doubles
   realtime_tools::RealtimeBuffer<std::vector<double>> rt_impedance_buffer_;
   rclcpp::Subscription<std_msgs::msg::Float64MultiArray>::SharedPtr
       impedance_sub_;
@@ -93,6 +123,15 @@ class ComplianceController : public controller_interface::ControllerInterface {
   std::shared_ptr<
       realtime_tools::RealtimePublisher<std_msgs::msg::Float64MultiArray>>
       gains_pub_;  // publishes [kp_current..., kd_current...]
+
+  // --- External force estimation ---
+  // tau_ext = tau_motor (from HW effort state) - tau_ff (from model)
+  // Low-pass filtered to remove high-frequency noise.
+  std::shared_ptr<
+      realtime_tools::RealtimePublisher<std_msgs::msg::Float64MultiArray>>
+      ext_force_pub_;  // publishes ~/external_force
+  std::vector<double> tau_ext_filtered_;  // low-pass filtered external torque
+  double ext_force_alpha_ = 0.05;         // filter coefficient (from YAML)
 
   // --- Helpers ---
   void compute_gravity(const KDL::JntArray& q, KDL::JntArray& tau_g);

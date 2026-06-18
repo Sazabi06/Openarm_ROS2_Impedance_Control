@@ -1,5 +1,5 @@
---- /home/nirvana-ai/ros2_ws/src/core/openarm_ros2/openarm_hardware/src/v10_simple_hardware.cpp.bak	2026-04-17 13:45:03.780810488 -0400
-+++ /home/nirvana-ai/ros2_ws/src/core/openarm_ros2/openarm_hardware/src/v10_simple_hardware.cpp	2026-04-17 13:46:29.169949241 -0400
+--- /home/user/ros2_ws/src/core/openarm_ros2/openarm_hardware/src/v10_simple_hardware.cpp.bak	2026-04-17 13:45:03.780810488 -0400
++++ /home/user/ros2_ws/src/core/openarm_ros2/openarm_hardware/src/v10_simple_hardware.cpp	2026-04-17 13:46:29.169949241 -0400
 @@ -178,6 +178,11 @@
                  "  J%zu: kp=%.1f (min=%.1f), kd=%.2f (min=%.2f)",
                  i + 1, kp_[i], kp_min_[i], kd_[i], kd_min_[i]);

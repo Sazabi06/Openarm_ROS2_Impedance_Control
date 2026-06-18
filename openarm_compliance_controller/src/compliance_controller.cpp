@@ -58,6 +58,16 @@ controller_interface::CallbackReturn ComplianceController::on_init() {
     auto_declare<double>("delta_kp_max", 2.0);
     auto_declare<double>("delta_kd_max", 0.1);
 
+    // External force estimation
+    auto_declare<double>("ext_force_alpha", 0.05);
+
+    // Gripper impedance (Task 2.5) — optional, empty = disabled
+    auto_declare<std::string>("gripper_joint", "");
+    auto_declare<double>("gripper_kp_default", 2.0);
+    auto_declare<double>("gripper_kd_default", 0.5);
+    auto_declare<double>("gripper_kp_max", 10.0);
+    auto_declare<double>("gripper_kd_max", 2.0);
+
   } catch (const std::exception& e) {
     RCLCPP_ERROR(get_node()->get_logger(), "on_init exception: %s", e.what());
     return controller_interface::CallbackReturn::ERROR;
@@ -78,11 +88,16 @@ ComplianceController::command_interface_configuration() const {
     conf.names.push_back(joint + "/stiffness");
     conf.names.push_back(joint + "/damping");
   }
+  // Gripper: stiffness + damping only (no effort — gripper has its own position controller)
+  if (has_gripper_) {
+    conf.names.push_back(gripper_joint_name_ + "/stiffness");
+    conf.names.push_back(gripper_joint_name_ + "/damping");
+  }
   return conf;
 }
 
 // ============================================================
-// state_interface_configuration — read position + velocity
+// state_interface_configuration — read position + velocity + effort
 // ============================================================
 controller_interface::InterfaceConfiguration
 ComplianceController::state_interface_configuration() const {
@@ -91,6 +106,7 @@ ComplianceController::state_interface_configuration() const {
   for (const auto& joint : joint_names_) {
     conf.names.push_back(joint + "/" + hardware_interface::HW_IF_POSITION);
     conf.names.push_back(joint + "/" + hardware_interface::HW_IF_VELOCITY);
+    conf.names.push_back(joint + "/" + hardware_interface::HW_IF_EFFORT);
   }
   return conf;
 }
@@ -130,6 +146,23 @@ controller_interface::CallbackReturn ComplianceController::on_configure(
   kd_min_ = get_node()->get_parameter("kd_min").as_double_array();
   delta_kp_max_ = get_node()->get_parameter("delta_kp_max").as_double();
   delta_kd_max_ = get_node()->get_parameter("delta_kd_max").as_double();
+
+  // Load gripper config (Task 2.5)
+  gripper_joint_name_ = get_node()->get_parameter("gripper_joint").as_string();
+  has_gripper_ = !gripper_joint_name_.empty();
+  if (has_gripper_) {
+    gripper_kp_default_ = get_node()->get_parameter("gripper_kp_default").as_double();
+    gripper_kd_default_ = get_node()->get_parameter("gripper_kd_default").as_double();
+    gripper_kp_max_ = get_node()->get_parameter("gripper_kp_max").as_double();
+    gripper_kd_max_ = get_node()->get_parameter("gripper_kd_max").as_double();
+    gripper_kp_current_ = gripper_kp_default_;
+    gripper_kd_current_ = gripper_kd_default_;
+    gripper_kp_desired_ = gripper_kp_default_;
+    gripper_kd_desired_ = gripper_kd_default_;
+    RCLCPP_INFO(get_node()->get_logger(),
+                "Gripper impedance enabled: joint=%s, kp=%.1f, kd=%.2f",
+                gripper_joint_name_.c_str(), gripper_kp_default_, gripper_kd_default_);
+  }
 
   // Validate array sizes
   auto validate_size = [&](const std::vector<double>& v, const std::string& name) {
@@ -212,9 +245,11 @@ controller_interface::CallbackReturn ComplianceController::on_configure(
     return controller_interface::CallbackReturn::ERROR;
   }
 
-  // Create dynamics solver
+  // Create dynamics solver — ChainDynParam stores a const& to the chain,
+  // so active_chain_ (member) must outlive the solver.
+  active_chain_ = chain_;
   KDL::Vector gravity(0.0, 0.0, -9.81);
-  dyn_solver_ = std::make_unique<KDL::ChainDynParam>(chain_, gravity);
+  dyn_solver_ = std::make_unique<KDL::ChainDynParam>(active_chain_, gravity);
   kdl_initialized_ = true;
 
   RCLCPP_INFO(get_node()->get_logger(),
@@ -241,10 +276,14 @@ controller_interface::CallbackReturn ComplianceController::on_configure(
   impedance_sub_ = get_node()->create_subscription<std_msgs::msg::Float64MultiArray>(
       "~/impedance_params", 10,
       [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
-        if (msg->data.size() != 2 * num_joints_) {
+        // Accept 14 values (arm only) or 16 values (arm + gripper).
+        // 16 values are accepted even without gripper — extra 2 are ignored.
+        // This keeps the profile manager interface uniform across sim and real HW.
+        if (msg->data.size() != 2 * num_joints_ &&
+            msg->data.size() != 2 * num_joints_ + 2) {
           RCLCPP_WARN(get_node()->get_logger(),
-                      "impedance_params: expected %zu values, got %zu",
-                      2 * num_joints_, msg->data.size());
+                      "impedance_params: expected %zu or %zu values, got %zu",
+                      2 * num_joints_, 2 * num_joints_ + 2, msg->data.size());
           return;
         }
         // Reject non-finite values: a NaN/Inf would pass through std::clamp
@@ -265,6 +304,27 @@ controller_interface::CallbackReturn ComplianceController::on_configure(
   default_cmd.insert(default_cmd.end(), kd_default_.begin(), kd_default_.end());
   rt_impedance_buffer_.initRT(default_cmd);
 
+  // Create payload subscriber: ~/set_payload (Float64MultiArray)
+  // Data format: [mass_kg, cog_x_m, cog_y_m, cog_z_m]
+  // The solver rebuild happens HERE in the subscriber callback (non-RT thread),
+  // NOT in the 100 Hz update() loop. This avoids memory allocation in the RT path.
+  payload_sub_ = get_node()->create_subscription<std_msgs::msg::Float64MultiArray>(
+      "~/set_payload", 10,
+      [this](const std_msgs::msg::Float64MultiArray::SharedPtr msg) {
+        if (msg->data.size() == 4) {
+          const double mass = std::max(msg->data[0], 0.0);
+          const KDL::Vector cog(msg->data[1], msg->data[2], msg->data[3]);
+          rebuild_dynamics_with_payload(mass, cog);
+          RCLCPP_INFO(get_node()->get_logger(),
+                      "Payload set: mass=%.3f kg, CoG=(%.3f, %.3f, %.3f)",
+                      mass, cog.x(), cog.y(), cog.z());
+        } else {
+          RCLCPP_WARN(get_node()->get_logger(),
+                      "set_payload: expected 4 values [mass, cx, cy, cz], got %zu",
+                      msg->data.size());
+        }
+      });
+
   // Create tau_ff publisher
   tau_ff_pub_ = std::make_shared<
       realtime_tools::RealtimePublisher<std_msgs::msg::Float64MultiArray>>(
@@ -276,6 +336,14 @@ controller_interface::CallbackReturn ComplianceController::on_configure(
       realtime_tools::RealtimePublisher<std_msgs::msg::Float64MultiArray>>(
       get_node()->create_publisher<std_msgs::msg::Float64MultiArray>(
           "~/gains", 10));
+
+  // Create external force publisher: ~/external_force
+  ext_force_pub_ = std::make_shared<
+      realtime_tools::RealtimePublisher<std_msgs::msg::Float64MultiArray>>(
+      get_node()->create_publisher<std_msgs::msg::Float64MultiArray>(
+          "~/external_force", 10));
+  ext_force_alpha_ = get_node()->get_parameter("ext_force_alpha").as_double();
+  tau_ext_filtered_.assign(num_joints_, 0.0);
 
   RCLCPP_INFO(get_node()->get_logger(),
               "Compliance controller configured. Scale factors:");
@@ -308,6 +376,13 @@ controller_interface::CallbackReturn ComplianceController::on_activate(
     command_interfaces_[i * 3 + 2].set_value(kd_current_[i]); // damping
   }
 
+  // Write gripper defaults (Task 2.5)
+  if (has_gripper_) {
+    const size_t grip_base = num_joints_ * 3;  // after 7 arm joints × 3 interfaces
+    command_interfaces_[grip_base + 0].set_value(gripper_kp_default_);  // stiffness
+    command_interfaces_[grip_base + 1].set_value(gripper_kd_default_);  // damping
+  }
+
   RCLCPP_INFO(get_node()->get_logger(),
               "Compliance controller activated with default gains");
   return controller_interface::CallbackReturn::SUCCESS;
@@ -323,6 +398,13 @@ controller_interface::CallbackReturn ComplianceController::on_deactivate(
     command_interfaces_[i * 3 + 0].set_value(0.0);             // tau_ff = 0
     command_interfaces_[i * 3 + 1].set_value(kp_default_[i]);  // restore stiffness
     command_interfaces_[i * 3 + 2].set_value(kd_default_[i]);  // restore damping
+  }
+
+  // Restore gripper defaults (Task 2.5)
+  if (has_gripper_) {
+    const size_t grip_base = num_joints_ * 3;
+    command_interfaces_[grip_base + 0].set_value(gripper_kp_default_);
+    command_interfaces_[grip_base + 1].set_value(gripper_kd_default_);
   }
 
   RCLCPP_INFO(get_node()->get_logger(),
@@ -342,12 +424,15 @@ controller_interface::return_type ComplianceController::update(
 
   const unsigned int nj = chain_.getNrOfJoints();
 
+
   // ------ 1. Read state interfaces ------
+  // State interface order per joint: position(0), velocity(1), effort(2)
   KDL::JntArray q(nj), qdot(nj);
+  std::vector<double> tau_motor(num_joints_, 0.0);
   for (size_t i = 0; i < num_joints_ && i < nj; ++i) {
-    // State interface order per joint: position(0), velocity(1)
-    q(i) = state_interfaces_[i * 2 + 0].get_value();
-    qdot(i) = state_interfaces_[i * 2 + 1].get_value();
+    q(i) = state_interfaces_[i * 3 + 0].get_value();
+    qdot(i) = state_interfaces_[i * 3 + 1].get_value();
+    tau_motor[i] = state_interfaces_[i * 3 + 2].get_value();
   }
 
   // ------ 2. Compute tau_ff = scale*(gravity + coriolis) + friction ------
@@ -366,10 +451,15 @@ controller_interface::return_type ComplianceController::update(
 
   // ------ 3. Read desired Kp/Kd from RT buffer ------
   const auto* cmd = rt_impedance_buffer_.readFromRT();
-  if (cmd && cmd->size() == 2 * num_joints_) {
+  if (cmd && cmd->size() >= 2 * num_joints_) {
     for (size_t i = 0; i < num_joints_; ++i) {
       kp_desired_[i] = (*cmd)[i];
       kd_desired_[i] = (*cmd)[i + num_joints_];
+    }
+    // Extended format: [kp..., kd..., grip_kp, grip_kd]
+    if (has_gripper_ && cmd->size() == 2 * num_joints_ + 2) {
+      gripper_kp_desired_ = (*cmd)[2 * num_joints_];
+      gripper_kd_desired_ = (*cmd)[2 * num_joints_ + 1];
     }
   }
 
@@ -403,13 +493,48 @@ controller_interface::return_type ComplianceController::update(
     command_interfaces_[i * 3 + 2].set_value(kd);   // damping
   }
 
-  // ------ 7. Publish tau_ff for diagnostics (non-blocking) ------
+  // ------ 6b. Write gripper stiffness/damping (Task 2.5) ------
+  if (has_gripper_) {
+    // Rate-limit gripper Kp
+    double grip_kp_delta = gripper_kp_desired_ - gripper_kp_current_;
+    grip_kp_delta = std::clamp(grip_kp_delta, -delta_kp_max_, delta_kp_max_);
+    gripper_kp_current_ += grip_kp_delta;
+    gripper_kp_current_ = std::clamp(gripper_kp_current_, 0.3, gripper_kp_max_);
+
+    // Rate-limit gripper Kd
+    double grip_kd_delta = gripper_kd_desired_ - gripper_kd_current_;
+    grip_kd_delta = std::clamp(grip_kd_delta, -delta_kd_max_, delta_kd_max_);
+    gripper_kd_current_ += grip_kd_delta;
+    gripper_kd_current_ = std::clamp(gripper_kd_current_, 0.05, gripper_kd_max_);
+
+    const size_t grip_base = num_joints_ * 3;
+    command_interfaces_[grip_base + 0].set_value(gripper_kp_current_);
+    command_interfaces_[grip_base + 1].set_value(gripper_kd_current_);
+  }
+
+  // ------ 7. External force estimation ------
+  // tau_ext = tau_motor (actual from HW) - tau_ff (expected from model)
+  std::vector<double> tau_ext(num_joints_, 0.0);
+  for (size_t i = 0; i < num_joints_; ++i) {
+    double tau_ext_raw = tau_motor[i] - tau_ff[i];
+    // Low-pass filter to remove high-frequency noise
+    tau_ext_filtered_[i] += ext_force_alpha_ * (tau_ext_raw - tau_ext_filtered_[i]);
+    tau_ext[i] = tau_ext_filtered_[i];
+  }
+
+  // ------ 8. Publish tau_ff for diagnostics (non-blocking) ------
   if (tau_ff_pub_ && tau_ff_pub_->trylock()) {
     tau_ff_pub_->msg_.data = tau_ff;
     tau_ff_pub_->unlockAndPublish();
   }
 
-  // ------ 8. Publish actual gains (clamped values) ------
+  // ------ 9. Publish external force ------
+  if (ext_force_pub_ && ext_force_pub_->trylock()) {
+    ext_force_pub_->msg_.data = tau_ext;
+    ext_force_pub_->unlockAndPublish();
+  }
+
+  // ------ 10. Publish actual gains (clamped values) ------
   if (gains_pub_ && gains_pub_->trylock()) {
     gains_pub_->msg_.data.clear();
     gains_pub_->msg_.data.insert(
@@ -428,12 +553,14 @@ controller_interface::return_type ComplianceController::update(
 
 void ComplianceController::compute_gravity(
     const KDL::JntArray& q, KDL::JntArray& tau_g) {
+  std::lock_guard<std::mutex> lock(chain_mutex_);
   dyn_solver_->JntToGravity(q, tau_g);
 }
 
 void ComplianceController::compute_coriolis(
     const KDL::JntArray& q, const KDL::JntArray& qdot,
     KDL::JntArray& tau_c) {
+  std::lock_guard<std::mutex> lock(chain_mutex_);
   dyn_solver_->JntToCoriolis(q, qdot, tau_c);
 }
 
@@ -449,6 +576,36 @@ void ComplianceController::compute_friction(
                + Fv_[i] * dq
                + Fo_[i];
   }
+}
+
+void ComplianceController::rebuild_dynamics_with_payload(
+    double mass, const KDL::Vector& cog) {
+  std::lock_guard<std::mutex> lock(chain_mutex_);
+
+  // Reset active_chain_ to the original URDF chain
+  active_chain_ = chain_;
+
+  // Modify the last segment's inertia by adding the payload mass
+  if (mass > 0.001) {
+    const unsigned int last_seg_idx = active_chain_.getNrOfSegments() - 1;
+    KDL::Segment& last_seg = active_chain_.getSegment(last_seg_idx);
+    KDL::RigidBodyInertia orig_inertia = last_seg.getInertia();
+
+    KDL::RigidBodyInertia payload_inertia(
+        mass, cog, KDL::RotationalInertia::Zero());
+
+    last_seg.setInertia(orig_inertia + payload_inertia);
+  }
+
+  // Re-create dynamics solver — references active_chain_ (member, not local!)
+  KDL::Vector gravity(0.0, 0.0, -9.81);
+  dyn_solver_ = std::make_unique<KDL::ChainDynParam>(active_chain_, gravity);
+
+  // Track what's currently in the solver
+  active_payload_mass_ = mass;
+
+  RCLCPP_INFO(get_node()->get_logger(),
+              "Dynamics solver rebuilt: payload=%.3f kg", mass);
 }
 
 }  // namespace openarm_compliance_controller
