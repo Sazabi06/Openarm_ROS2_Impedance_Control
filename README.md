@@ -1,4 +1,4 @@
-# 🤖 OpenArm Impedance Controller
+# OpenArm Impedance Controller
 
 **Variable impedance control for the [OpenArm V10](https://openarm.dev) bimanual robot — enabling safe, compliant human-robot interaction and teach-mode data collection.**
 
